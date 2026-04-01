@@ -23,9 +23,12 @@ export function getImageProxyUrl(): string | null {
 
   // 如果未设置，则使用全局对象
   const serverImageProxy = (window as any).RUNTIME_CONFIG?.IMAGE_PROXY;
-  return serverImageProxy && serverImageProxy.trim()
-    ? serverImageProxy.trim()
-    : null;
+  if (serverImageProxy && serverImageProxy.trim()) {
+    return serverImageProxy.trim();
+  }
+
+  // 默认使用内置代理
+  return '/api/image-proxy?url=';
 }
 
 /**
@@ -61,9 +64,12 @@ export function getDoubanProxyUrl(): string | null {
 
   // 如果未设置，则使用全局对象
   const serverDoubanProxy = (window as any).RUNTIME_CONFIG?.DOUBAN_PROXY;
-  return serverDoubanProxy && serverDoubanProxy.trim()
-    ? serverDoubanProxy.trim()
-    : null;
+  if (serverDoubanProxy && serverDoubanProxy.trim()) {
+    return serverDoubanProxy.trim();
+  }
+
+  // 默认使用内置代理
+  return '/api/image-proxy?url=';
 }
 
 /**
@@ -159,14 +165,14 @@ export async function getVideoResolutionFromM3u8(m3u8Url: string): Promise<{
               width >= 3840
                 ? '4K' // 4K: 3840x2160
                 : width >= 2560
-                ? '2K' // 2K: 2560x1440
-                : width >= 1920
-                ? '1080p' // 1080p: 1920x1080
-                : width >= 1280
-                ? '720p' // 720p: 1280x720
-                : width >= 854
-                ? '480p'
-                : 'SD'; // 480p: 854x480
+                  ? '2K' // 2K: 2560x1440
+                  : width >= 1920
+                    ? '1080p' // 1080p: 1920x1080
+                    : width >= 1280
+                      ? '720p' // 720p: 1280x720
+                      : width >= 854
+                        ? '480p'
+                        : 'SD'; // 480p: 854x480
 
             resolve({
               quality,
@@ -241,7 +247,7 @@ export async function getVideoResolutionFromM3u8(m3u8Url: string): Promise<{
     throw new Error(
       `Error getting video resolution: ${
         error instanceof Error ? error.message : String(error)
-      }`
+      }`,
     );
   }
 }
