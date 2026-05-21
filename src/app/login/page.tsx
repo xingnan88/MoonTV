@@ -79,14 +79,30 @@ function LoginPageClient() {
   const { siteName } = useSite();
 
   // 在客户端挂载后设置配置
+  // 优先使用 API 获取（构建时 NEXT_PUBLIC_* 变量可能未被编译进客户端），
+  // 回退到 window.RUNTIME_CONFIG
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    const loadConfig = async () => {
+      try {
+        const res = await fetch('/api/server-config');
+        if (res.ok) {
+          const data = await res.json();
+          setShouldAskUsername(
+            data.StorageType && data.StorageType !== 'localstorage'
+          );
+          setEnableRegister(Boolean(data.EnableRegister));
+          return;
+        }
+      } catch (_) {
+        // API 不可用，回退到 RUNTIME_CONFIG
+      }
       const storageType = (window as any).RUNTIME_CONFIG?.STORAGE_TYPE;
       setShouldAskUsername(storageType && storageType !== 'localstorage');
       setEnableRegister(
         Boolean((window as any).RUNTIME_CONFIG?.ENABLE_REGISTER)
       );
-    }
+    };
+    loadConfig();
   }, []);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {

@@ -9,10 +9,10 @@ description: 构建 MoonTV 项目并部署到 Cloudflare Pages
 
 ## 步骤
 
-1. 运行构建命令：
+1. 运行构建命令（必须使用 `pages:build`，它会额外运行 `@cloudflare/next-on-pages` 生成 CF Pages 兼容产物）：
 
    ```bash
-   pnpm build
+   pnpm pages:build
    ```
 
 2. 部署到 Cloudflare Pages：
@@ -39,5 +39,6 @@ description: 构建 MoonTV 项目并部署到 Cloudflare Pages
 ## 注意事项
 
 - 构建前会自动运行 `pnpm gen:runtime` 和 `pnpm gen:manifest` 生成配置文件
+- ⚠️ 必须使用 `pnpm pages:build` 而非 `pnpm build`，后者不会运行 `@cloudflare/next-on-pages`，导致部署的是未转换的旧产物
 - 如果只修改了环境变量或 D1 绑定（通过 Cloudflare Dashboard/API），需要重新部署一次才能生效
 - `--commit-dirty=true` 用于忽略未提交更改的警告

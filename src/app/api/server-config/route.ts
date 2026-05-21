@@ -13,6 +13,7 @@ export async function GET(request: NextRequest) {
   const result = {
     SiteName: config.SiteConfig.SiteName,
     StorageType: process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage',
+    EnableRegister: config.UserConfig.AllowRegister ?? false,
   };
   return NextResponse.json(result);
 }
