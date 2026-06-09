@@ -41,6 +41,7 @@ sitemap.xml
 sitemap-*.xml
 
 # generated files
+.codex-screenshots/
 src/lib/runtime.ts
 public/manifest.json
 public/sw.js
