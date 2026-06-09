@@ -21,6 +21,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  if (storageType === 'd1') {
+    return NextResponse.json(
+      {
+        error: 'D1 模式下邀请码由管理员管理',
+      },
+      { status: 400 }
+    );
+  }
+
   try {
     const body = await request.json();
     const { newPassword } = body;

@@ -1,10 +1,18 @@
 /* eslint-disable no-console, @typescript-eslint/no-explicit-any, @typescript-eslint/no-non-null-assertion */
 
 import { AdminConfig } from './admin.types';
-import { Favorite, IStorage, PlayRecord, SkipConfig } from './types';
+import {
+  Favorite,
+  InviteDuration,
+  InviteUser,
+  IStorage,
+  PlayRecord,
+  SkipConfig,
+} from './types';
 
 // 搜索历史最大条数
 const SEARCH_HISTORY_LIMIT = 20;
+const INVITE_CODE_RE = /^\d{6}$/;
 
 // D1 数据库接口
 interface D1Database {
@@ -44,12 +52,73 @@ function getD1Database(): D1Database {
 
 export class D1Storage implements IStorage {
   private db: D1Database | null = null;
+  private inviteSchemaReady = false;
 
   private async getDatabase(): Promise<D1Database> {
     if (!this.db) {
       this.db = getD1Database();
     }
     return this.db;
+  }
+
+  private async ensureInviteSchema(): Promise<void> {
+    if (this.inviteSchemaReady) return;
+
+    const db = await this.getDatabase();
+    const statements = [
+      'ALTER TABLE users ADD COLUMN invite_expires_at INTEGER',
+      'ALTER TABLE users ADD COLUMN invite_enabled INTEGER NOT NULL DEFAULT 1',
+      "ALTER TABLE users ADD COLUMN invite_note TEXT NOT NULL DEFAULT ''",
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_invite_code ON users(password)',
+      'CREATE INDEX IF NOT EXISTS idx_users_invite_expires_at ON users(invite_expires_at)',
+    ];
+
+    for (const sql of statements) {
+      try {
+        await db.prepare(sql).run();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (!message.toLowerCase().includes('duplicate column')) {
+          throw err;
+        }
+      }
+    }
+
+    this.inviteSchemaReady = true;
+  }
+
+  private inviteExpiresAt(duration: InviteDuration, from = Date.now()): number {
+    const base = new Date(from);
+    switch (duration) {
+      case 'week':
+        base.setDate(base.getDate() + 7);
+        break;
+      case 'month':
+        base.setMonth(base.getMonth() + 1);
+        break;
+      case 'year':
+        base.setFullYear(base.getFullYear() + 1);
+        break;
+      default:
+        base.setDate(base.getDate() + 7);
+    }
+    return Math.floor(base.getTime() / 1000);
+  }
+
+  private generateInviteCode(): string {
+    const bytes = new Uint8Array(4);
+    crypto.getRandomValues(bytes);
+    const value =
+      ((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]) >>> 0;
+    return String(value % 1000000).padStart(6, '0');
+  }
+
+  private generateUsername(): string {
+    const bytes = new Uint8Array(4);
+    crypto.getRandomValues(bytes);
+    return `user_${Array.from(bytes)
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('')}`;
   }
 
   // 播放记录相关
@@ -274,10 +343,14 @@ export class D1Storage implements IStorage {
   // 用户相关
   async registerUser(userName: string, password: string): Promise<void> {
     try {
+      await this.ensureInviteSchema();
       const db = await this.getDatabase();
+      const expiresAt = this.inviteExpiresAt('year');
       await db
-        .prepare('INSERT INTO users (username, password) VALUES (?, ?)')
-        .bind(userName, password)
+        .prepare(
+          'INSERT INTO users (username, password, invite_expires_at, invite_enabled) VALUES (?, ?, ?, 1)'
+        )
+        .bind(userName, password, expiresAt)
         .run();
     } catch (err) {
       console.error('Failed to register user:', err);
@@ -287,10 +360,13 @@ export class D1Storage implements IStorage {
 
   async verifyUser(userName: string, password: string): Promise<boolean> {
     try {
+      await this.ensureInviteSchema();
       const db = await this.getDatabase();
       const result = await db
-        .prepare('SELECT password FROM users WHERE username = ?')
-        .bind(userName)
+        .prepare(
+          'SELECT password FROM users WHERE username = ? AND invite_enabled = 1 AND invite_expires_at > ?'
+        )
+        .bind(userName, Math.floor(Date.now() / 1000))
         .first<{ password: string }>();
 
       return result?.password === password;
@@ -300,8 +376,180 @@ export class D1Storage implements IStorage {
     }
   }
 
+  async findUserByInviteCode(inviteCode: string): Promise<InviteUser | null> {
+    if (!INVITE_CODE_RE.test(inviteCode)) return null;
+
+    try {
+      await this.ensureInviteSchema();
+      const db = await this.getDatabase();
+      const now = Math.floor(Date.now() / 1000);
+      const result = await db
+        .prepare(
+          `SELECT username, password AS invite_code, invite_note, invite_expires_at, invite_enabled, created_at
+           FROM users
+           WHERE password = ? AND invite_enabled = 1 AND invite_expires_at > ?`
+        )
+        .bind(inviteCode, now)
+        .first<any>();
+
+      if (!result) return null;
+      return {
+        username: result.username,
+        invite_code: result.invite_code,
+        invite_note: result.invite_note || '',
+        invite_expires_at: result.invite_expires_at,
+        invite_enabled: Boolean(result.invite_enabled),
+        created_at: result.created_at,
+      };
+    } catch (err) {
+      console.error('Failed to find user by invite code:', err);
+      throw err;
+    }
+  }
+
+  async getInviteUser(userName: string): Promise<InviteUser | null> {
+    try {
+      await this.ensureInviteSchema();
+      const db = await this.getDatabase();
+      const result = await db
+        .prepare(
+          `SELECT username, password AS invite_code, invite_note, invite_expires_at, invite_enabled, created_at
+           FROM users
+           WHERE username = ?`
+        )
+        .bind(userName)
+        .first<any>();
+
+      if (!result) return null;
+      return {
+        username: result.username,
+        invite_code: result.invite_code,
+        invite_note: result.invite_note || '',
+        invite_expires_at: result.invite_expires_at,
+        invite_enabled: Boolean(result.invite_enabled),
+        created_at: result.created_at,
+      };
+    } catch (err) {
+      console.error('Failed to get invite user:', err);
+      throw err;
+    }
+  }
+
+  async getInviteUsers(): Promise<InviteUser[]> {
+    try {
+      await this.ensureInviteSchema();
+      const db = await this.getDatabase();
+      const result = await db
+        .prepare(
+          `SELECT username, password AS invite_code, invite_note, invite_expires_at, invite_enabled, created_at
+           FROM users
+           ORDER BY created_at DESC`
+        )
+        .all<any>();
+
+      return result.results.map((row) => ({
+        username: row.username,
+        invite_code: row.invite_code,
+        invite_note: row.invite_note || '',
+        invite_expires_at: row.invite_expires_at,
+        invite_enabled: Boolean(row.invite_enabled),
+        created_at: row.created_at,
+      }));
+    } catch (err) {
+      console.error('Failed to get invite users:', err);
+      throw err;
+    }
+  }
+
+  async createInviteUser(duration: InviteDuration): Promise<InviteUser> {
+    try {
+      await this.ensureInviteSchema();
+      const db = await this.getDatabase();
+      const expiresAt = this.inviteExpiresAt(duration);
+
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const username = this.generateUsername();
+        const inviteCode = this.generateInviteCode();
+        try {
+          await db
+            .prepare(
+              'INSERT INTO users (username, password, invite_expires_at, invite_enabled) VALUES (?, ?, ?, 1)'
+            )
+            .bind(username, inviteCode, expiresAt)
+            .run();
+          return {
+            username,
+            invite_code: inviteCode,
+            invite_note: '',
+            invite_expires_at: expiresAt,
+            invite_enabled: true,
+            created_at: Math.floor(Date.now() / 1000),
+          };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (!message.toLowerCase().includes('unique')) {
+            throw err;
+          }
+        }
+      }
+
+      throw new Error('无法生成唯一邀请码');
+    } catch (err) {
+      console.error('Failed to create invite user:', err);
+      throw err;
+    }
+  }
+
+  async updateInviteUser(
+    userName: string,
+    updates: {
+      duration?: InviteDuration;
+      enabled?: boolean;
+      note?: string;
+    }
+  ): Promise<InviteUser> {
+    try {
+      await this.ensureInviteSchema();
+      const current = await this.getInviteUser(userName);
+      if (!current) {
+        throw new Error('用户不存在');
+      }
+
+      const db = await this.getDatabase();
+      let expiresAt = current.invite_expires_at;
+      if (updates.duration) {
+        const base = Math.max(Date.now(), current.invite_expires_at * 1000);
+        expiresAt = this.inviteExpiresAt(updates.duration, base);
+      }
+      const enabled =
+        typeof updates.enabled === 'boolean'
+          ? updates.enabled
+          : current.invite_enabled;
+      const note =
+        typeof updates.note === 'string' ? updates.note : current.invite_note;
+
+      await db
+        .prepare(
+          'UPDATE users SET invite_expires_at = ?, invite_enabled = ?, invite_note = ? WHERE username = ?'
+        )
+        .bind(expiresAt, enabled ? 1 : 0, note, userName)
+        .run();
+
+      return {
+        ...current,
+        invite_note: note,
+        invite_expires_at: expiresAt,
+        invite_enabled: enabled,
+      };
+    } catch (err) {
+      console.error('Failed to update invite user:', err);
+      throw err;
+    }
+  }
+
   async checkUserExist(userName: string): Promise<boolean> {
     try {
+      await this.ensureInviteSchema();
       const db = await this.getDatabase();
       const result = await db
         .prepare('SELECT 1 FROM users WHERE username = ?')

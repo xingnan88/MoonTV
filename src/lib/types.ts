@@ -25,6 +25,17 @@ export interface Favorite {
   search_title: string; // 搜索时使用的标题
 }
 
+export type InviteDuration = 'week' | 'month' | 'year';
+
+export interface InviteUser {
+  username: string;
+  invite_code: string;
+  invite_note: string;
+  invite_expires_at: number;
+  invite_enabled: boolean;
+  created_at: number;
+}
+
 // 存储接口
 export interface IStorage {
   // 播放记录相关
@@ -46,6 +57,18 @@ export interface IStorage {
   // 用户相关
   registerUser(userName: string, password: string): Promise<void>;
   verifyUser(userName: string, password: string): Promise<boolean>;
+  findUserByInviteCode?(inviteCode: string): Promise<InviteUser | null>;
+  getInviteUser?(userName: string): Promise<InviteUser | null>;
+  getInviteUsers?(): Promise<InviteUser[]>;
+  createInviteUser?(duration: InviteDuration): Promise<InviteUser>;
+  updateInviteUser?(
+    userName: string,
+    updates: {
+      duration?: InviteDuration;
+      enabled?: boolean;
+      note?: string;
+    }
+  ): Promise<InviteUser>;
   // 检查用户是否存在（无需密码）
   checkUserExist(userName: string): Promise<boolean>;
   // 修改用户密码

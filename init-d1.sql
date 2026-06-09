@@ -1,6 +1,9 @@
 CREATE TABLE IF NOT EXISTS users (
   username TEXT PRIMARY KEY,
   password TEXT NOT NULL,
+  invite_expires_at INTEGER,
+  invite_enabled INTEGER NOT NULL DEFAULT 1,
+  invite_note TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
 );
 
@@ -70,3 +73,5 @@ CREATE INDEX IF NOT EXISTS idx_search_history_username_keyword ON search_history
 CREATE INDEX IF NOT EXISTS idx_search_history_username_created_at ON search_history(username, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_skip_configs_username_source_id ON skip_configs(username, source, id_video);
 CREATE INDEX IF NOT EXISTS idx_search_history_username_id_created_at ON search_history(username, id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_invite_code ON users(password);
+CREATE INDEX IF NOT EXISTS idx_users_invite_expires_at ON users(invite_expires_at);

@@ -14,6 +14,11 @@ const STORAGE_TYPE =
     | 'd1'
     | 'upstash'
     | undefined) || 'localstorage';
+const INVITE_CODE_RE = /^\d{6}$/;
+const failedLoginAttempts = new Map<
+  string,
+  { count: number; resetAt: number }
+>();
 
 // 生成签名
 async function generateSignature(
@@ -67,8 +72,74 @@ async function generateAuthCookie(
   return encodeURIComponent(JSON.stringify(authData));
 }
 
+function getClientKey(req: NextRequest): string {
+  return (
+    req.headers.get('cf-connecting-ip') ||
+    req.headers.get('x-forwarded-for') ||
+    'unknown'
+  );
+}
+
+function isRateLimited(req: NextRequest): boolean {
+  const key = getClientKey(req);
+  const current = failedLoginAttempts.get(key);
+  if (!current) return false;
+  if (Date.now() > current.resetAt) {
+    failedLoginAttempts.delete(key);
+    return false;
+  }
+  return current.count >= 10;
+}
+
+function recordFailedLogin(req: NextRequest) {
+  const key = getClientKey(req);
+  const current = failedLoginAttempts.get(key);
+  if (!current || Date.now() > current.resetAt) {
+    failedLoginAttempts.set(key, {
+      count: 1,
+      resetAt: Date.now() + 10 * 60 * 1000,
+    });
+    return;
+  }
+  failedLoginAttempts.set(key, {
+    count: current.count + 1,
+    resetAt: current.resetAt,
+  });
+}
+
+function clearFailedLogin(req: NextRequest) {
+  failedLoginAttempts.delete(getClientKey(req));
+}
+
+function setAuthCookie(
+  response: NextResponse,
+  cookieValue: string,
+  expires: Date
+) {
+  response.cookies.set('auth', cookieValue, {
+    path: '/',
+    expires,
+    sameSite: 'lax',
+    httpOnly: false,
+    secure: false,
+  });
+}
+
+function defaultExpires(): Date {
+  const expires = new Date();
+  expires.setDate(expires.getDate() + 7);
+  return expires;
+}
+
 export async function POST(req: NextRequest) {
   try {
+    if (isRateLimited(req)) {
+      return NextResponse.json(
+        { error: '登录尝试过多，请稍后再试' },
+        { status: 429 }
+      );
+    }
+
     // 本地 / localStorage 模式——仅校验固定密码
     if (STORAGE_TYPE === 'localstorage') {
       const envPassword = process.env.PASSWORD;
@@ -112,19 +183,67 @@ export async function POST(req: NextRequest) {
       const expires = new Date();
       expires.setDate(expires.getDate() + 7); // 7天过期
 
-      response.cookies.set('auth', cookieValue, {
-        path: '/',
-        expires,
-        sameSite: 'lax', // 改为 lax 以支持 PWA
-        httpOnly: false, // PWA 需要客户端可访问
-        secure: false, // 根据协议自动设置
-      });
+      setAuthCookie(response, cookieValue, expires);
+      clearFailedLogin(req);
 
       return response;
     }
 
-    // 数据库 / redis 模式——校验用户名并尝试连接数据库
-    const { username, password } = await req.json();
+    const body = await req.json();
+    const { username, password, inviteCode } = body as {
+      username?: string;
+      password?: string;
+      inviteCode?: string;
+    };
+
+    if (typeof inviteCode === 'string') {
+      const normalizedInviteCode = inviteCode.trim();
+      if (!INVITE_CODE_RE.test(normalizedInviteCode)) {
+        recordFailedLogin(req);
+        return NextResponse.json(
+          { error: '邀请码无效或已失效' },
+          { status: 401 }
+        );
+      }
+
+      const inviteUser = await db.findUserByInviteCode(normalizedInviteCode);
+      if (!inviteUser) {
+        recordFailedLogin(req);
+        return NextResponse.json(
+          { error: '邀请码无效或已失效' },
+          { status: 401 }
+        );
+      }
+
+      const config = await getConfig();
+      const user = config.UserConfig.Users.find(
+        (u) => u.username === inviteUser.username
+      );
+      if (user && user.banned) {
+        recordFailedLogin(req);
+        return NextResponse.json(
+          { error: '邀请码无效或已失效' },
+          { status: 401 }
+        );
+      }
+
+      const response = NextResponse.json({ ok: true });
+      const cookieValue = await generateAuthCookie(
+        inviteUser.username,
+        undefined,
+        user?.role || 'user',
+        false
+      );
+      const inviteExpires = new Date(inviteUser.invite_expires_at * 1000);
+      const expires =
+        inviteExpires.getTime() < defaultExpires().getTime()
+          ? inviteExpires
+          : defaultExpires();
+
+      setAuthCookie(response, cookieValue, expires);
+      clearFailedLogin(req);
+      return response;
+    }
 
     if (!username || typeof username !== 'string') {
       return NextResponse.json({ error: '用户名不能为空' }, { status: 400 });
@@ -146,62 +265,17 @@ export async function POST(req: NextRequest) {
         'owner',
         false
       ); // 数据库模式不包含 password
-      const expires = new Date();
-      expires.setDate(expires.getDate() + 7); // 7天过期
-
-      response.cookies.set('auth', cookieValue, {
-        path: '/',
-        expires,
-        sameSite: 'lax', // 改为 lax 以支持 PWA
-        httpOnly: false, // PWA 需要客户端可访问
-        secure: false, // 根据协议自动设置
-      });
+      setAuthCookie(response, cookieValue, defaultExpires());
+      clearFailedLogin(req);
 
       return response;
     } else if (username === process.env.USERNAME) {
+      recordFailedLogin(req);
       return NextResponse.json({ error: '用户名或密码错误' }, { status: 401 });
     }
 
-    const config = await getConfig();
-    const user = config.UserConfig.Users.find((u) => u.username === username);
-    if (user && user.banned) {
-      return NextResponse.json({ error: '用户被封禁' }, { status: 401 });
-    }
-
-    // 校验用户密码
-    try {
-      const pass = await db.verifyUser(username, password);
-      if (!pass) {
-        return NextResponse.json(
-          { error: '用户名或密码错误' },
-          { status: 401 }
-        );
-      }
-
-      // 验证成功，设置认证cookie
-      const response = NextResponse.json({ ok: true });
-      const cookieValue = await generateAuthCookie(
-        username,
-        password,
-        user?.role || 'user',
-        false
-      ); // 数据库模式不包含 password
-      const expires = new Date();
-      expires.setDate(expires.getDate() + 7); // 7天过期
-
-      response.cookies.set('auth', cookieValue, {
-        path: '/',
-        expires,
-        sameSite: 'lax', // 改为 lax 以支持 PWA
-        httpOnly: false, // PWA 需要客户端可访问
-        secure: false, // 根据协议自动设置
-      });
-
-      return response;
-    } catch (err) {
-      console.error('数据库验证失败', err);
-      return NextResponse.json({ error: '数据库错误' }, { status: 500 });
-    }
+    recordFailedLogin(req);
+    return NextResponse.json({ error: '用户名或密码错误' }, { status: 401 });
   } catch (error) {
     console.error('登录接口异常', error);
     return NextResponse.json({ error: '服务器错误' }, { status: 500 });
