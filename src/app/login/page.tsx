@@ -11,7 +11,6 @@ import { checkForUpdates, CURRENT_VERSION, UpdateStatus } from '@/lib/version';
 import { useSite } from '@/components/SiteProvider';
 import { ThemeToggle } from '@/components/ThemeToggle';
 
-// 版本显示组件
 function VersionDisplay() {
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [isChecking, setIsChecking] = useState(true);
@@ -22,7 +21,7 @@ function VersionDisplay() {
         const status = await checkForUpdates();
         setUpdateStatus(status);
       } catch (_) {
-        // do nothing
+        // ignore update check failures
       } finally {
         setIsChecking(false);
       }
@@ -36,7 +35,7 @@ function VersionDisplay() {
       onClick={() =>
         window.open('https://github.com/senshinya/MoonTV', '_blank')
       }
-      className='absolute bottom-4 left-1/2 transform -translate-x-1/2 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 transition-colors cursor-pointer'
+      className='absolute bottom-4 left-1/2 flex -translate-x-1/2 transform cursor-pointer items-center gap-2 text-xs text-gray-500 transition-colors dark:text-gray-400'
     >
       <span className='font-mono'>v{CURRENT_VERSION}</span>
       {!isChecking && updateStatus !== UpdateStatus.FETCH_FAILED && (
@@ -51,14 +50,14 @@ function VersionDisplay() {
         >
           {updateStatus === UpdateStatus.HAS_UPDATE && (
             <>
-              <AlertCircle className='w-3.5 h-3.5' />
-              <span className='font-semibold text-xs'>有新版本</span>
+              <AlertCircle className='h-3.5 w-3.5' />
+              <span className='text-xs font-semibold'>有新版本</span>
             </>
           )}
           {updateStatus === UpdateStatus.NO_UPDATE && (
             <>
-              <CheckCircle className='w-3.5 h-3.5' />
-              <span className='font-semibold text-xs'>已是最新</span>
+              <CheckCircle className='h-3.5 w-3.5' />
+              <span className='text-xs font-semibold'>已是最新</span>
             </>
           )}
         </div>
@@ -70,183 +69,176 @@ function VersionDisplay() {
 function LoginPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [password, setPassword] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
   const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [adminMode, setAdminMode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [shouldAskUsername, setShouldAskUsername] = useState(false);
-  const [enableRegister, setEnableRegister] = useState(false);
   const { siteName } = useSite();
+  const inviteCodeValid = /^\d{6}$/.test(inviteCode);
 
-  // 在客户端挂载后设置配置
-  // 优先使用 API 获取（构建时 NEXT_PUBLIC_* 变量可能未被编译进客户端），
-  // 回退到 window.RUNTIME_CONFIG
-  useEffect(() => {
-    const loadConfig = async () => {
-      try {
-        const res = await fetch('/api/server-config');
-        if (res.ok) {
-          const data = await res.json();
-          setShouldAskUsername(
-            data.StorageType && data.StorageType !== 'localstorage'
-          );
-          setEnableRegister(Boolean(data.EnableRegister));
-          return;
-        }
-      } catch (_) {
-        // API 不可用，回退到 RUNTIME_CONFIG
-      }
-      const storageType = (window as any).RUNTIME_CONFIG?.STORAGE_TYPE;
-      setShouldAskUsername(storageType && storageType !== 'localstorage');
-      setEnableRegister(
-        Boolean((window as any).RUNTIME_CONFIG?.ENABLE_REGISTER)
-      );
-    };
-    loadConfig();
-  }, []);
+  const redirectAfterLogin = () => {
+    const redirect = searchParams.get('redirect') || '/';
+    router.replace(redirect);
+  };
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleInviteSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
 
-    if (!password || (shouldAskUsername && !username)) return;
+    if (!/^\d{6}$/.test(inviteCode)) {
+      setError('请输入 6 位数字邀请码');
+      return;
+    }
 
     try {
       setLoading(true);
       const res = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          password,
-          ...(shouldAskUsername ? { username } : {}),
-        }),
+        body: JSON.stringify({ inviteCode }),
       });
 
       if (res.ok) {
-        const redirect = searchParams.get('redirect') || '/';
-        router.replace(redirect);
-      } else if (res.status === 401) {
-        setError('密码错误');
+        redirectAfterLogin();
       } else {
         const data = await res.json().catch(() => ({}));
-        setError(data.error ?? '服务器错误');
+        setError(data.error || '邀请码无效或已失效');
       }
-    } catch (error) {
-      setError('网络错误，请稍后重试');
+    } catch (_) {
+      setError('登录失败，请稍后重试');
     } finally {
       setLoading(false);
     }
   };
 
-  // 处理注册逻辑
-  const handleRegister = async () => {
+  const handleAdminSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
     setError(null);
-    if (!password || !username) return;
+
+    if (!username || !password) {
+      setError('请输入管理员账号和密码');
+      return;
+    }
 
     try {
       setLoading(true);
-      const res = await fetch('/api/register', {
+      const res = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
       });
 
       if (res.ok) {
-        const redirect = searchParams.get('redirect') || '/';
-        router.replace(redirect);
+        redirectAfterLogin();
       } else {
         const data = await res.json().catch(() => ({}));
-        setError(data.error ?? '服务器错误');
+        setError(data.error || '用户名或密码错误');
       }
-    } catch (error) {
-      setError('网络错误，请稍后重试');
+    } catch (_) {
+      setError('登录失败，请稍后重试');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className='relative min-h-screen flex items-center justify-center px-4 overflow-hidden'>
-      <div className='absolute top-4 right-4'>
+    <div className='relative flex min-h-screen items-center justify-center overflow-hidden px-4'>
+      <div className='absolute right-4 top-4'>
         <ThemeToggle />
       </div>
-      <div className='relative z-10 w-full max-w-md rounded-3xl bg-gradient-to-b from-white/90 via-white/70 to-white/40 dark:from-zinc-900/90 dark:via-zinc-900/70 dark:to-zinc-900/40 backdrop-blur-xl shadow-2xl p-10 dark:border dark:border-zinc-800'>
-        <h1 className='text-green-600 tracking-tight text-center text-3xl font-extrabold mb-8 bg-clip-text drop-shadow-sm'>
+      <div className='relative z-10 w-full max-w-md rounded-3xl bg-gradient-to-b from-white/90 via-white/70 to-white/40 p-10 shadow-2xl backdrop-blur-xl dark:border dark:border-zinc-800 dark:from-zinc-900/90 dark:via-zinc-900/70 dark:to-zinc-900/40'>
+        <h1 className='mb-2 bg-clip-text text-center text-3xl font-extrabold tracking-tight text-green-600 drop-shadow-sm'>
           {siteName}
         </h1>
-        <form onSubmit={handleSubmit} className='space-y-8'>
-          {shouldAskUsername && (
+        <p className='mb-8 text-center text-sm text-gray-500 dark:text-gray-400'>
+          {adminMode ? '管理员登录' : '输入 6 位邀请码'}
+        </p>
+
+        {!adminMode ? (
+          <form onSubmit={handleInviteSubmit} className='space-y-6'>
             <div>
-              <label htmlFor='username' className='sr-only'>
-                用户名
+              <label htmlFor='inviteCode' className='sr-only'>
+                邀请码
               </label>
               <input
-                id='username'
-                type='text'
-                autoComplete='username'
-                className='block w-full rounded-lg border-0 py-3 px-4 text-gray-900 dark:text-gray-100 shadow-sm ring-1 ring-white/60 dark:ring-white/20 placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:ring-2 focus:ring-green-500 focus:outline-none sm:text-base bg-white/60 dark:bg-zinc-800/60 backdrop-blur'
-                placeholder='输入用户名'
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                id='inviteCode'
+                type='tel'
+                inputMode='numeric'
+                pattern='[0-9]*'
+                maxLength={6}
+                autoComplete='one-time-code'
+                className='block w-full rounded-lg border-0 bg-white/60 px-4 py-3 text-center font-mono text-2xl tracking-[0.4em] text-gray-900 shadow-sm ring-1 ring-white/60 backdrop-blur placeholder:tracking-normal placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:bg-zinc-800/60 dark:text-gray-100 dark:ring-white/20 dark:placeholder:text-gray-400'
+                placeholder='6 位邀请码'
+                value={inviteCode}
+                onInput={(e) => {
+                  const target = e.currentTarget;
+                  target.value = target.value.replace(/\D/g, '').slice(0, 6);
+                }}
+                onChange={(e) =>
+                  setInviteCode(e.target.value.replace(/\D/g, '').slice(0, 6))
+                }
               />
             </div>
-          )}
 
-          <div>
-            <label htmlFor='password' className='sr-only'>
-              密码
-            </label>
-            <input
-              id='password'
-              type='password'
-              autoComplete='current-password'
-              className='block w-full rounded-lg border-0 py-3 px-4 text-gray-900 dark:text-gray-100 shadow-sm ring-1 ring-white/60 dark:ring-white/20 placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:ring-2 focus:ring-green-500 focus:outline-none sm:text-base bg-white/60 dark:bg-zinc-800/60 backdrop-blur'
-              placeholder='输入访问密码'
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
+            {error && (
+              <p className='text-sm text-red-600 dark:text-red-400'>{error}</p>
+            )}
 
-          {error && (
-            <p className='text-sm text-red-600 dark:text-red-400'>{error}</p>
-          )}
-
-          {/* 登录 / 注册按钮 */}
-          {shouldAskUsername && enableRegister ? (
-            <div className='flex gap-4'>
-              <button
-                type='button'
-                onClick={handleRegister}
-                disabled={!password || !username || loading}
-                className='flex-1 inline-flex justify-center rounded-lg bg-blue-600 py-3 text-base font-semibold text-white shadow-lg transition-all duration-200 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50'
-              >
-                {loading ? '注册中...' : '注册'}
-              </button>
-              <button
-                type='submit'
-                disabled={
-                  !password || loading || (shouldAskUsername && !username)
-                }
-                className='flex-1 inline-flex justify-center rounded-lg bg-green-600 py-3 text-base font-semibold text-white shadow-lg transition-all duration-200 hover:from-green-600 hover:to-blue-600 disabled:cursor-not-allowed disabled:opacity-50'
-              >
-                {loading ? '登录中...' : '登录'}
-              </button>
-            </div>
-          ) : (
             <button
               type='submit'
-              disabled={
-                !password || loading || (shouldAskUsername && !username)
-              }
-              className='inline-flex w-full justify-center rounded-lg bg-green-600 py-3 text-base font-semibold text-white shadow-lg transition-all duration-200 hover:from-green-600 hover:to-blue-600 disabled:cursor-not-allowed disabled:opacity-50'
+              disabled={!inviteCodeValid || loading}
+              className='inline-flex w-full justify-center rounded-lg bg-green-600 py-3 text-base font-semibold text-white shadow-lg transition-all duration-200 hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50'
             >
               {loading ? '登录中...' : '登录'}
             </button>
-          )}
-        </form>
+          </form>
+        ) : (
+          <form onSubmit={handleAdminSubmit} className='space-y-6'>
+            <input
+              type='text'
+              autoComplete='username'
+              className='block w-full rounded-lg border-0 bg-white/60 px-4 py-3 text-gray-900 shadow-sm ring-1 ring-white/60 backdrop-blur placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:bg-zinc-800/60 dark:text-gray-100 dark:ring-white/20 dark:placeholder:text-gray-400'
+              placeholder='管理员账号'
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+            />
+            <input
+              type='password'
+              autoComplete='current-password'
+              className='block w-full rounded-lg border-0 bg-white/60 px-4 py-3 text-gray-900 shadow-sm ring-1 ring-white/60 backdrop-blur placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:bg-zinc-800/60 dark:text-gray-100 dark:ring-white/20 dark:placeholder:text-gray-400'
+              placeholder='管理员密码'
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+
+            {error && (
+              <p className='text-sm text-red-600 dark:text-red-400'>{error}</p>
+            )}
+
+            <button
+              type='submit'
+              disabled={!username || !password || loading}
+              className='inline-flex w-full justify-center rounded-lg bg-green-600 py-3 text-base font-semibold text-white shadow-lg transition-all duration-200 hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50'
+            >
+              {loading ? '登录中...' : '管理员登录'}
+            </button>
+          </form>
+        )}
+
+        <button
+          type='button'
+          onClick={() => {
+            setAdminMode((value) => !value);
+            setError(null);
+          }}
+          className='mt-6 w-full text-center text-sm text-gray-500 underline-offset-4 hover:text-green-600 hover:underline dark:text-gray-400'
+        >
+          {adminMode ? '返回邀请码登录' : '管理员登录'}
+        </button>
       </div>
 
-      {/* 版本信息显示 */}
       <VersionDisplay />
     </div>
   );

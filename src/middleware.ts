@@ -4,6 +4,15 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
 
+interface D1PreparedStatement {
+  bind(...values: unknown[]): D1PreparedStatement;
+  first<T = unknown>(): Promise<T | null>;
+}
+
+interface D1Database {
+  prepare(sql: string): D1PreparedStatement;
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -51,12 +60,36 @@ export async function middleware(request: NextRequest) {
 
     // 签名验证通过即可
     if (isValidSignature) {
+      if (storageType === 'd1' && authInfo.username !== process.env.USERNAME) {
+        const isActive = await isD1InviteActive(authInfo.username);
+        if (!isActive) {
+          return handleAuthFailure(request, pathname);
+        }
+      }
       return NextResponse.next();
     }
   }
 
   // 签名验证失败或不存在签名
   return handleAuthFailure(request, pathname);
+}
+
+async function isD1InviteActive(username: string): Promise<boolean> {
+  try {
+    const d1 = (process.env as unknown as { DB?: D1Database }).DB;
+    if (!d1) return false;
+    const now = Math.floor(Date.now() / 1000);
+    const result = await d1
+      .prepare(
+        'SELECT 1 FROM users WHERE username = ? AND invite_enabled = 1 AND invite_expires_at > ?'
+      )
+      .bind(username, now)
+      .first();
+    return Boolean(result);
+  } catch (error) {
+    console.error('邀请码会话验证失败:', error);
+    return false;
+  }
 }
 
 // 验证签名

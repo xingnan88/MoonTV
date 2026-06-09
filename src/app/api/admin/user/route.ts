@@ -57,6 +57,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '参数格式错误' }, { status: 400 });
     }
 
+    if (
+      storageType === 'd1' &&
+      (action === 'add' || action === 'changePassword')
+    ) {
+      return NextResponse.json(
+        { error: 'D1 模式下请使用邀请码管理' },
+        { status: 400 }
+      );
+    }
+
     if (action !== 'setAllowRegister' && !targetUsername) {
       return NextResponse.json({ error: '缺少目标用户名' }, { status: 400 });
     }

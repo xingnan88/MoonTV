@@ -3,7 +3,14 @@
 import { AdminConfig } from './admin.types';
 import { D1Storage } from './d1.db';
 import { RedisStorage } from './redis.db';
-import { Favorite, IStorage, PlayRecord, SkipConfig } from './types';
+import {
+  Favorite,
+  InviteDuration,
+  InviteUser,
+  IStorage,
+  PlayRecord,
+  SkipConfig,
+} from './types';
 import { UpstashRedisStorage } from './upstash.db';
 
 // storage type 常量: 'localstorage' | 'redis' | 'd1' | 'upstash'，默认 'localstorage'
@@ -140,6 +147,47 @@ export class DbManager {
 
   async verifyUser(userName: string, password: string): Promise<boolean> {
     return this.storage.verifyUser(userName, password);
+  }
+
+  async findUserByInviteCode(inviteCode: string): Promise<InviteUser | null> {
+    if (typeof (this.storage as any).findUserByInviteCode === 'function') {
+      return (this.storage as any).findUserByInviteCode(inviteCode);
+    }
+    return null;
+  }
+
+  async getInviteUser(userName: string): Promise<InviteUser | null> {
+    if (typeof (this.storage as any).getInviteUser === 'function') {
+      return (this.storage as any).getInviteUser(userName);
+    }
+    return null;
+  }
+
+  async getInviteUsers(): Promise<InviteUser[]> {
+    if (typeof (this.storage as any).getInviteUsers === 'function') {
+      return (this.storage as any).getInviteUsers();
+    }
+    return [];
+  }
+
+  async createInviteUser(duration: InviteDuration): Promise<InviteUser> {
+    if (typeof (this.storage as any).createInviteUser === 'function') {
+      return (this.storage as any).createInviteUser(duration);
+    }
+    throw new Error('当前存储不支持邀请码');
+  }
+
+  async updateInviteUser(
+    userName: string,
+    updates: {
+      duration?: InviteDuration;
+      enabled?: boolean;
+    }
+  ): Promise<InviteUser> {
+    if (typeof (this.storage as any).updateInviteUser === 'function') {
+      return (this.storage as any).updateInviteUser(userName, updates);
+    }
+    throw new Error('当前存储不支持邀请码');
   }
 
   // 检查用户是否已存在

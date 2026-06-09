@@ -127,157 +127,142 @@ interface UserConfigProps {
 }
 
 const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
-  const [userSettings, setUserSettings] = useState({
-    enableRegistration: false,
-  });
-  const [showAddUserForm, setShowAddUserForm] = useState(false);
-  const [showChangePasswordForm, setShowChangePasswordForm] = useState(false);
-  const [newUser, setNewUser] = useState({
-    username: '',
-    password: '',
-  });
-  const [changePasswordUser, setChangePasswordUser] = useState({
-    username: '',
-    password: '',
-  });
+  type InviteDuration = 'week' | 'month' | 'year';
+  type InviteRow = {
+    username: string;
+    invite_code: string;
+    invite_expires_at: number;
+    invite_enabled: boolean;
+    created_at: number;
+    role: 'user' | 'admin' | 'owner';
+    banned?: boolean;
+  };
 
-  // 当前登录用户名
+  const [invites, setInvites] = useState<InviteRow[]>([]);
+  const [duration, setDuration] = useState<InviteDuration>('week');
+  const [loadingInvites, setLoadingInvites] = useState(false);
   const currentUsername = getAuthInfoFromBrowserCookie()?.username || null;
 
-  // 检测存储类型是否为 d1
-  const isD1Storage =
-    typeof window !== 'undefined' &&
-    (window as any).RUNTIME_CONFIG?.STORAGE_TYPE === 'd1';
-  const isUpstashStorage =
-    typeof window !== 'undefined' &&
-    (window as any).RUNTIME_CONFIG?.STORAGE_TYPE === 'upstash';
-
-  useEffect(() => {
-    if (config?.UserConfig) {
-      setUserSettings({
-        enableRegistration: config.UserConfig.AllowRegister,
-      });
-    }
-  }, [config]);
-
-  // 切换允许注册设置
-  const toggleAllowRegister = async (value: boolean) => {
+  const fetchInvites = useCallback(async () => {
     try {
-      // 先更新本地 UI
-      setUserSettings((prev) => ({ ...prev, enableRegistration: value }));
-
-      const res = await fetch('/api/admin/user', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'setAllowRegister',
-          allowRegister: value,
-        }),
-      });
-
+      setLoadingInvites(true);
+      const res = await fetch('/api/admin/invites');
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `操作失败: ${res.status}`);
+        throw new Error(data.error || '获取邀请码失败');
       }
-
-      await refreshConfig();
+      const data = (await res.json()) as { users: InviteRow[] };
+      setInvites(data.users);
     } catch (err) {
-      showError(err instanceof Error ? err.message : '操作失败');
-      // revert toggle UI
-      setUserSettings((prev) => ({ ...prev, enableRegistration: !value }));
+      showError(err instanceof Error ? err.message : '获取邀请码失败');
+    } finally {
+      setLoadingInvites(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchInvites();
+  }, [fetchInvites]);
+
+  const callInviteApi = async (
+    method: 'POST' | 'PATCH' | 'DELETE',
+    body: Record<string, unknown>
+  ) => {
+    const res = await fetch('/api/admin/invites', {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `操作失败: ${res.status}`);
+    }
+
+    await fetchInvites();
+    await refreshConfig();
+  };
+
+  const handleCreateInvite = async () => {
+    try {
+      await callInviteApi('POST', { duration });
+      showSuccess('邀请码已创建');
+    } catch (err) {
+      showError(err instanceof Error ? err.message : '创建失败');
     }
   };
 
-  const handleBanUser = async (uname: string) => {
-    await handleUserAction('ban', uname);
+  const formatDate = (timestamp: number) =>
+    new Date(timestamp * 1000).toLocaleString();
+
+  const getStatus = (invite: InviteRow) => {
+    const now = Date.now() / 1000;
+    if (!invite.invite_enabled) return '已禁用';
+    if (invite.invite_expires_at <= now) return '已过期';
+    if (invite.invite_expires_at - now <= 3 * 24 * 60 * 60) return '即将过期';
+    return '有效';
   };
 
-  const handleUnbanUser = async (uname: string) => {
-    await handleUserAction('unban', uname);
+  const statusClass = (status: string) => {
+    switch (status) {
+      case '有效':
+        return 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300';
+      case '即将过期':
+        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300';
+      case '已过期':
+        return 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300';
+      default:
+        return 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300';
+    }
   };
 
-  const handleSetAdmin = async (uname: string) => {
-    await handleUserAction('setAdmin', uname);
+  const handleToggleEnabled = async (invite: InviteRow) => {
+    try {
+      await callInviteApi('PATCH', {
+        username: invite.username,
+        enabled: !invite.invite_enabled,
+      });
+      showSuccess(invite.invite_enabled ? '邀请码已禁用' : '邀请码已启用');
+    } catch (err) {
+      showError(err instanceof Error ? err.message : '操作失败');
+    }
   };
 
-  const handleRemoveAdmin = async (uname: string) => {
-    await handleUserAction('cancelAdmin', uname);
+  const handleRenew = async (invite: InviteRow, value: InviteDuration) => {
+    try {
+      await callInviteApi('PATCH', {
+        username: invite.username,
+        duration: value,
+      });
+      showSuccess('邀请码已续期');
+    } catch (err) {
+      showError(err instanceof Error ? err.message : '续期失败');
+    }
   };
 
-  const handleAddUser = async () => {
-    if (!newUser.username || !newUser.password) return;
-    await handleUserAction('add', newUser.username, newUser.password);
-    setNewUser({ username: '', password: '' });
-    setShowAddUserForm(false);
-  };
-
-  const handleChangePassword = async () => {
-    if (!changePasswordUser.username || !changePasswordUser.password) return;
-    await handleUserAction(
-      'changePassword',
-      changePasswordUser.username,
-      changePasswordUser.password
-    );
-    setChangePasswordUser({ username: '', password: '' });
-    setShowChangePasswordForm(false);
-  };
-
-  const handleShowChangePasswordForm = (username: string) => {
-    setChangePasswordUser({ username, password: '' });
-    setShowChangePasswordForm(true);
-    setShowAddUserForm(false); // 关闭添加用户表单
-  };
-
-  const handleDeleteUser = async (username: string) => {
+  const handleDelete = async (invite: InviteRow) => {
     const { isConfirmed } = await Swal.fire({
-      title: '确认删除用户',
-      text: `删除用户 ${username} 将同时删除其搜索历史、播放记录和收藏夹，此操作不可恢复！`,
+      title: '确认删除邀请码',
+      text: `删除 ${invite.invite_code} 会同时删除该用户的播放记录、收藏、搜索历史和跳过配置。`,
       icon: 'warning',
       showCancelButton: true,
       confirmButtonText: '确认删除',
       cancelButtonText: '取消',
       confirmButtonColor: '#dc2626',
     });
-
     if (!isConfirmed) return;
 
-    await handleUserAction('deleteUser', username);
+    try {
+      await callInviteApi('DELETE', { username: invite.username });
+      showSuccess('邀请码已删除');
+    } catch (err) {
+      showError(err instanceof Error ? err.message : '删除失败');
+    }
   };
 
-  // 通用请求函数
-  const handleUserAction = async (
-    action:
-      | 'add'
-      | 'ban'
-      | 'unban'
-      | 'setAdmin'
-      | 'cancelAdmin'
-      | 'changePassword'
-      | 'deleteUser',
-    targetUsername: string,
-    targetPassword?: string
-  ) => {
-    try {
-      const res = await fetch('/api/admin/user', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          targetUsername,
-          ...(targetPassword ? { targetPassword } : {}),
-          action,
-        }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `操作失败: ${res.status}`);
-      }
-
-      // 成功后刷新配置（无需整页刷新）
-      await refreshConfig();
-    } catch (err) {
-      showError(err instanceof Error ? err.message : '操作失败');
-    }
+  const copyInvite = async (code: string) => {
+    await navigator.clipboard.writeText(code);
+    showSuccess('邀请码已复制');
   };
 
   if (!config) {
@@ -290,343 +275,147 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
 
   return (
     <div className='space-y-6'>
-      {/* 用户统计 */}
       <div>
-        <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300 mb-3'>
-          用户统计
+        <h4 className='mb-3 text-sm font-medium text-gray-700 dark:text-gray-300'>
+          邀请码统计
         </h4>
-        <div className='p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800'>
+        <div className='rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-900/20'>
           <div className='text-2xl font-bold text-green-800 dark:text-green-300'>
-            {config.UserConfig.Users.length}
+            {invites.length}
           </div>
           <div className='text-sm text-green-600 dark:text-green-400'>
-            总用户数
+            已创建邀请码
           </div>
         </div>
       </div>
 
-      {/* 注册设置 */}
-      <div>
-        <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300 mb-3'>
-          注册设置
-        </h4>
-        <div className='flex items-center justify-between'>
-          <label
-            className={`text-gray-700 dark:text-gray-300 ${
-              isD1Storage || isUpstashStorage ? 'opacity-50' : ''
-            }`}
+      <div className='rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900'>
+        <div className='flex flex-col gap-3 sm:flex-row sm:items-center'>
+          <select
+            value={duration}
+            onChange={(e) => setDuration(e.target.value as InviteDuration)}
+            className='rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
           >
-            允许新用户注册
-            {isD1Storage && (
-              <span className='ml-2 text-xs text-gray-500 dark:text-gray-400'>
-                (D1 环境下请通过环境变量修改)
-              </span>
-            )}
-            {isUpstashStorage && (
-              <span className='ml-2 text-xs text-gray-500 dark:text-gray-400'>
-                (Upstash 环境下请通过环境变量修改)
-              </span>
-            )}
-          </label>
+            <option value='week'>一周</option>
+            <option value='month'>一个月</option>
+            <option value='year'>一年</option>
+          </select>
           <button
-            onClick={() =>
-              !isD1Storage &&
-              !isUpstashStorage &&
-              toggleAllowRegister(!userSettings.enableRegistration)
-            }
-            disabled={isD1Storage || isUpstashStorage}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
-              userSettings.enableRegistration
-                ? 'bg-green-600'
-                : 'bg-gray-200 dark:bg-gray-700'
-            } ${
-              isD1Storage || isUpstashStorage
-                ? 'opacity-50 cursor-not-allowed'
-                : ''
-            }`}
+            onClick={handleCreateInvite}
+            className='rounded-lg bg-green-600 px-4 py-2 text-white transition-colors hover:bg-green-700'
           >
-            <span
-              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                userSettings.enableRegistration
-                  ? 'translate-x-6'
-                  : 'translate-x-1'
-              }`}
-            />
+            新增邀请码
           </button>
         </div>
       </div>
 
-      {/* 用户列表 */}
-      <div>
-        <div className='flex items-center justify-between mb-3'>
-          <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-            用户列表
-          </h4>
-          <button
-            onClick={() => {
-              setShowAddUserForm(!showAddUserForm);
-              if (showChangePasswordForm) {
-                setShowChangePasswordForm(false);
-                setChangePasswordUser({ username: '', password: '' });
-              }
-            }}
-            className='px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded-lg transition-colors'
-          >
-            {showAddUserForm ? '取消' : '添加用户'}
-          </button>
-        </div>
-
-        {/* 添加用户表单 */}
-        {showAddUserForm && (
-          <div className='mb-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700'>
-            <div className='flex flex-col sm:flex-row gap-4 sm:gap-3'>
-              <input
-                type='text'
-                placeholder='用户名'
-                value={newUser.username}
-                onChange={(e) =>
-                  setNewUser((prev) => ({ ...prev, username: e.target.value }))
-                }
-                className='flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
-              />
-              <input
-                type='password'
-                placeholder='密码'
-                value={newUser.password}
-                onChange={(e) =>
-                  setNewUser((prev) => ({ ...prev, password: e.target.value }))
-                }
-                className='flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
-              />
-              <button
-                onClick={handleAddUser}
-                disabled={!newUser.username || !newUser.password}
-                className='w-full sm:w-auto px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white rounded-lg transition-colors'
-              >
-                添加
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* 修改密码表单 */}
-        {showChangePasswordForm && (
-          <div className='mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-700'>
-            <h5 className='text-sm font-medium text-blue-800 dark:text-blue-300 mb-3'>
-              修改用户密码
-            </h5>
-            <div className='flex flex-col sm:flex-row gap-4 sm:gap-3'>
-              <input
-                type='text'
-                placeholder='用户名'
-                value={changePasswordUser.username}
-                disabled
-                className='flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100 cursor-not-allowed'
-              />
-              <input
-                type='password'
-                placeholder='新密码'
-                value={changePasswordUser.password}
-                onChange={(e) =>
-                  setChangePasswordUser((prev) => ({
-                    ...prev,
-                    password: e.target.value,
-                  }))
-                }
-                className='flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent'
-              />
-              <button
-                onClick={handleChangePassword}
-                disabled={!changePasswordUser.password}
-                className='w-full sm:w-auto px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white rounded-lg transition-colors'
-              >
-                修改密码
-              </button>
-              <button
-                onClick={() => {
-                  setShowChangePasswordForm(false);
-                  setChangePasswordUser({ username: '', password: '' });
-                }}
-                className='w-full sm:w-auto px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors'
-              >
-                取消
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* 用户列表 */}
-        <div className='border border-gray-200 dark:border-gray-700 rounded-lg max-h-[28rem] overflow-y-auto overflow-x-auto'>
-          <table className='min-w-full divide-y divide-gray-200 dark:divide-gray-700'>
-            <thead className='bg-gray-50 dark:bg-gray-900'>
+      <div className='max-h-[32rem] overflow-x-auto overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700'>
+        <table className='min-w-full divide-y divide-gray-200 dark:divide-gray-700'>
+          <thead className='bg-gray-50 dark:bg-gray-900'>
+            <tr>
+              <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                邀请码
+              </th>
+              <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                内部用户
+              </th>
+              <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                状态
+              </th>
+              <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                失效时间
+              </th>
+              <th className='px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                操作
+              </th>
+            </tr>
+          </thead>
+          <tbody className='divide-y divide-gray-200 dark:divide-gray-700'>
+            {loadingInvites ? (
               <tr>
-                <th
-                  scope='col'
-                  className='px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'
+                <td
+                  colSpan={5}
+                  className='px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400'
                 >
-                  用户名
-                </th>
-                <th
-                  scope='col'
-                  className='px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'
-                >
-                  角色
-                </th>
-                <th
-                  scope='col'
-                  className='px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'
-                >
-                  状态
-                </th>
-                <th
-                  scope='col'
-                  className='px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'
-                >
-                  操作
-                </th>
+                  加载中...
+                </td>
               </tr>
-            </thead>
-            {/* 按规则排序用户：自己 -> 站长(若非自己) -> 管理员 -> 其他 */}
-            {(() => {
-              const sortedUsers = [...config.UserConfig.Users].sort((a, b) => {
-                type UserInfo = (typeof config.UserConfig.Users)[number];
-                const priority = (u: UserInfo) => {
-                  if (u.username === currentUsername) return 0;
-                  if (u.role === 'owner') return 1;
-                  if (u.role === 'admin') return 2;
-                  return 3;
-                };
-                return priority(a) - priority(b);
-              });
-              return (
-                <tbody className='divide-y divide-gray-200 dark:divide-gray-700'>
-                  {sortedUsers.map((user) => {
-                    // 修改密码权限：站长可修改管理员和普通用户密码，管理员可修改普通用户和自己的密码，但任何人都不能修改站长密码
-                    const canChangePassword =
-                      user.role !== 'owner' && // 不能修改站长密码
-                      (role === 'owner' || // 站长可以修改管理员和普通用户密码
-                        (role === 'admin' &&
-                          (user.role === 'user' ||
-                            user.username === currentUsername))); // 管理员可以修改普通用户和自己的密码
+            ) : invites.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={5}
+                  className='px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400'
+                >
+                  暂无邀请码
+                </td>
+              </tr>
+            ) : (
+              invites.map((invite) => {
+                const status = getStatus(invite);
+                const canOperate =
+                  invite.username !== currentUsername &&
+                  (role === 'owner' ||
+                    (role === 'admin' && invite.role === 'user'));
 
-                    // 删除用户权限：站长可删除除自己外的所有用户，管理员仅可删除普通用户
-                    const canDeleteUser =
-                      user.username !== currentUsername &&
-                      (role === 'owner' || // 站长可以删除除自己外的所有用户
-                        (role === 'admin' && user.role === 'user')); // 管理员仅可删除普通用户
-
-                    // 其他操作权限：不能操作自己，站长可操作所有用户，管理员可操作普通用户
-                    const canOperate =
-                      user.username !== currentUsername &&
-                      (role === 'owner' ||
-                        (role === 'admin' && user.role === 'user'));
-                    return (
-                      <tr
-                        key={user.username}
-                        className='hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors'
+                return (
+                  <tr
+                    key={invite.username}
+                    className='transition-colors hover:bg-gray-50 dark:hover:bg-gray-800'
+                  >
+                    <td className='whitespace-nowrap px-6 py-4 font-mono text-lg font-semibold tracking-[0.2em] text-gray-900 dark:text-gray-100'>
+                      {invite.invite_code}
+                    </td>
+                    <td className='whitespace-nowrap px-6 py-4 text-sm text-gray-600 dark:text-gray-300'>
+                      {invite.username}
+                    </td>
+                    <td className='whitespace-nowrap px-6 py-4'>
+                      <span
+                        className={`rounded-full px-2 py-1 text-xs ${statusClass(
+                          status
+                        )}`}
                       >
-                        <td className='px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100'>
-                          {user.username}
-                        </td>
-                        <td className='px-6 py-4 whitespace-nowrap'>
-                          <span
-                            className={`px-2 py-1 text-xs rounded-full ${
-                              user.role === 'owner'
-                                ? 'bg-yellow-100 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-300'
-                                : user.role === 'admin'
-                                ? 'bg-purple-100 dark:bg-purple-900/20 text-purple-800 dark:text-purple-300'
-                                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
-                            }`}
+                        {status}
+                      </span>
+                    </td>
+                    <td className='whitespace-nowrap px-6 py-4 text-sm text-gray-600 dark:text-gray-300'>
+                      {formatDate(invite.invite_expires_at)}
+                    </td>
+                    <td className='space-x-2 whitespace-nowrap px-6 py-4 text-right text-sm font-medium'>
+                      <button
+                        onClick={() => copyInvite(invite.invite_code)}
+                        className='rounded-full bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-800 transition-colors hover:bg-gray-200 dark:bg-gray-700/40 dark:text-gray-200 dark:hover:bg-gray-700/60'
+                      >
+                        复制
+                      </button>
+                      {canOperate && (
+                        <>
+                          <button
+                            onClick={() => handleRenew(invite, 'month')}
+                            className='rounded-full bg-blue-100 px-3 py-1.5 text-xs font-medium text-blue-800 transition-colors hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-200 dark:hover:bg-blue-900/60'
                           >
-                            {user.role === 'owner'
-                              ? '站长'
-                              : user.role === 'admin'
-                              ? '管理员'
-                              : '普通用户'}
-                          </span>
-                        </td>
-                        <td className='px-6 py-4 whitespace-nowrap'>
-                          <span
-                            className={`px-2 py-1 text-xs rounded-full ${
-                              !user.banned
-                                ? 'bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-300'
-                                : 'bg-red-100 dark:bg-red-900/20 text-red-800 dark:text-red-300'
-                            }`}
+                            续期一月
+                          </button>
+                          <button
+                            onClick={() => handleToggleEnabled(invite)}
+                            className='rounded-full bg-yellow-100 px-3 py-1.5 text-xs font-medium text-yellow-800 transition-colors hover:bg-yellow-200 dark:bg-yellow-900/40 dark:text-yellow-200 dark:hover:bg-yellow-900/60'
                           >
-                            {!user.banned ? '正常' : '已封禁'}
-                          </span>
-                        </td>
-                        <td className='px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2'>
-                          {/* 修改密码按钮 */}
-                          {canChangePassword && (
-                            <button
-                              onClick={() =>
-                                handleShowChangePasswordForm(user.username)
-                              }
-                              className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-900/40 dark:hover:bg-blue-900/60 dark:text-blue-200 transition-colors'
-                            >
-                              修改密码
-                            </button>
-                          )}
-                          {canOperate && (
-                            <>
-                              {/* 其他操作按钮 */}
-                              {user.role === 'user' && (
-                                <button
-                                  onClick={() => handleSetAdmin(user.username)}
-                                  className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 hover:bg-purple-200 dark:bg-purple-900/40 dark:hover:bg-purple-900/60 dark:text-purple-200 transition-colors'
-                                >
-                                  设为管理
-                                </button>
-                              )}
-                              {user.role === 'admin' && (
-                                <button
-                                  onClick={() =>
-                                    handleRemoveAdmin(user.username)
-                                  }
-                                  className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-gray-700/40 dark:hover:bg-gray-700/60 dark:text-gray-200 transition-colors'
-                                >
-                                  取消管理
-                                </button>
-                              )}
-                              {user.role !== 'owner' &&
-                                (!user.banned ? (
-                                  <button
-                                    onClick={() => handleBanUser(user.username)}
-                                    className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-red-100 text-red-800 hover:bg-red-200 dark:bg-red-900/40 dark:hover:bg-red-900/60 dark:text-red-300 transition-colors'
-                                  >
-                                    封禁
-                                  </button>
-                                ) : (
-                                  <button
-                                    onClick={() =>
-                                      handleUnbanUser(user.username)
-                                    }
-                                    className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-green-100 text-green-800 hover:bg-green-200 dark:bg-green-900/40 dark:hover:bg-green-900/60 dark:text-green-300 transition-colors'
-                                  >
-                                    解封
-                                  </button>
-                                ))}
-                            </>
-                          )}
-                          {/* 删除用户按钮 - 放在最后，使用更明显的红色样式 */}
-                          {canDeleteUser && (
-                            <button
-                              onClick={() => handleDeleteUser(user.username)}
-                              className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-red-600 text-white hover:bg-red-700 dark:bg-red-600 dark:hover:bg-red-700 transition-colors'
-                            >
-                              删除用户
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              );
-            })()}
-          </table>
-        </div>
+                            {invite.invite_enabled ? '禁用' : '启用'}
+                          </button>
+                          <button
+                            onClick={() => handleDelete(invite)}
+                            className='rounded-full bg-red-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-700'
+                          >
+                            删除
+                          </button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -1825,9 +1614,9 @@ function AdminPageClient() {
           </CollapsibleTab>
 
           <div className='space-y-4'>
-            {/* 用户配置标签 */}
+            {/* 邀请码管理标签 */}
             <CollapsibleTab
-              title='用户配置'
+              title='邀请码管理'
               icon={
                 <Users size={20} className='text-gray-600 dark:text-gray-400' />
               }
