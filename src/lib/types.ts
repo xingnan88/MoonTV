@@ -30,6 +30,7 @@ export type InviteDuration = 'week' | 'month' | 'year';
 export interface InviteUser {
   username: string;
   invite_code: string;
+  invite_note: string;
   invite_expires_at: number;
   invite_enabled: boolean;
   created_at: number;
@@ -65,6 +66,7 @@ export interface IStorage {
     updates: {
       duration?: InviteDuration;
       enabled?: boolean;
+      note?: string;
     }
   ): Promise<InviteUser>;
   // 检查用户是否存在（无需密码）

@@ -131,6 +131,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   type InviteRow = {
     username: string;
     invite_code: string;
+    invite_note: string;
     invite_expires_at: number;
     invite_enabled: boolean;
     created_at: number;
@@ -141,6 +142,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   const [invites, setInvites] = useState<InviteRow[]>([]);
   const [duration, setDuration] = useState<InviteDuration>('week');
   const [loadingInvites, setLoadingInvites] = useState(false);
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const currentUsername = getAuthInfoFromBrowserCookie()?.username || null;
 
   const fetchInvites = useCallback(async () => {
@@ -153,6 +155,14 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       }
       const data = (await res.json()) as { users: InviteRow[] };
       setInvites(data.users);
+      setNoteDrafts(
+        Object.fromEntries(
+          data.users.map((invite) => [
+            invite.username,
+            invite.invite_note || '',
+          ])
+        )
+      );
     } catch (err) {
       showError(err instanceof Error ? err.message : '获取邀请码失败');
     } finally {
@@ -240,6 +250,19 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     }
   };
 
+  const handleSaveNote = async (invite: InviteRow) => {
+    const note = (noteDrafts[invite.username] || '').trim();
+    try {
+      await callInviteApi('PATCH', {
+        username: invite.username,
+        note,
+      });
+      showSuccess('备注已保存');
+    } catch (err) {
+      showError(err instanceof Error ? err.message : '保存备注失败');
+    }
+  };
+
   const handleDelete = async (invite: InviteRow) => {
     const { isConfirmed } = await Swal.fire({
       title: '确认删除邀请码',
@@ -320,6 +343,9 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
                 内部用户
               </th>
               <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                备注
+              </th>
+              <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
                 状态
               </th>
               <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
@@ -334,7 +360,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
             {loadingInvites ? (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={6}
                   className='px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400'
                 >
                   加载中...
@@ -343,7 +369,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
             ) : invites.length === 0 ? (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={6}
                   className='px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400'
                 >
                   暂无邀请码
@@ -367,6 +393,36 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
                     </td>
                     <td className='whitespace-nowrap px-6 py-4 text-sm text-gray-600 dark:text-gray-300'>
                       {invite.username}
+                    </td>
+                    <td className='min-w-[16rem] px-6 py-4'>
+                      <div className='flex items-center gap-2'>
+                        <input
+                          type='text'
+                          maxLength={100}
+                          value={noteDrafts[invite.username] || ''}
+                          onChange={(e) =>
+                            setNoteDrafts((prev) => ({
+                              ...prev,
+                              [invite.username]: e.target.value,
+                            }))
+                          }
+                          disabled={!canOperate}
+                          placeholder='添加备注'
+                          className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+                        />
+                        {canOperate && (
+                          <button
+                            onClick={() => handleSaveNote(invite)}
+                            disabled={
+                              (noteDrafts[invite.username] || '').trim() ===
+                              (invite.invite_note || '')
+                            }
+                            className='rounded-full bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-800 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-gray-700/40 dark:text-gray-200 dark:hover:bg-gray-700/60'
+                          >
+                            保存
+                          </button>
+                        )}
+                      </div>
                     </td>
                     <td className='whitespace-nowrap px-6 py-4'>
                       <span

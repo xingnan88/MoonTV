@@ -68,6 +68,7 @@ export class D1Storage implements IStorage {
     const statements = [
       'ALTER TABLE users ADD COLUMN invite_expires_at INTEGER',
       'ALTER TABLE users ADD COLUMN invite_enabled INTEGER NOT NULL DEFAULT 1',
+      "ALTER TABLE users ADD COLUMN invite_note TEXT NOT NULL DEFAULT ''",
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_invite_code ON users(password)',
       'CREATE INDEX IF NOT EXISTS idx_users_invite_expires_at ON users(invite_expires_at)',
     ];
@@ -384,7 +385,7 @@ export class D1Storage implements IStorage {
       const now = Math.floor(Date.now() / 1000);
       const result = await db
         .prepare(
-          `SELECT username, password AS invite_code, invite_expires_at, invite_enabled, created_at
+          `SELECT username, password AS invite_code, invite_note, invite_expires_at, invite_enabled, created_at
            FROM users
            WHERE password = ? AND invite_enabled = 1 AND invite_expires_at > ?`
         )
@@ -395,6 +396,7 @@ export class D1Storage implements IStorage {
       return {
         username: result.username,
         invite_code: result.invite_code,
+        invite_note: result.invite_note || '',
         invite_expires_at: result.invite_expires_at,
         invite_enabled: Boolean(result.invite_enabled),
         created_at: result.created_at,
@@ -411,7 +413,7 @@ export class D1Storage implements IStorage {
       const db = await this.getDatabase();
       const result = await db
         .prepare(
-          `SELECT username, password AS invite_code, invite_expires_at, invite_enabled, created_at
+          `SELECT username, password AS invite_code, invite_note, invite_expires_at, invite_enabled, created_at
            FROM users
            WHERE username = ?`
         )
@@ -422,6 +424,7 @@ export class D1Storage implements IStorage {
       return {
         username: result.username,
         invite_code: result.invite_code,
+        invite_note: result.invite_note || '',
         invite_expires_at: result.invite_expires_at,
         invite_enabled: Boolean(result.invite_enabled),
         created_at: result.created_at,
@@ -438,7 +441,7 @@ export class D1Storage implements IStorage {
       const db = await this.getDatabase();
       const result = await db
         .prepare(
-          `SELECT username, password AS invite_code, invite_expires_at, invite_enabled, created_at
+          `SELECT username, password AS invite_code, invite_note, invite_expires_at, invite_enabled, created_at
            FROM users
            ORDER BY created_at DESC`
         )
@@ -447,6 +450,7 @@ export class D1Storage implements IStorage {
       return result.results.map((row) => ({
         username: row.username,
         invite_code: row.invite_code,
+        invite_note: row.invite_note || '',
         invite_expires_at: row.invite_expires_at,
         invite_enabled: Boolean(row.invite_enabled),
         created_at: row.created_at,
@@ -476,6 +480,7 @@ export class D1Storage implements IStorage {
           return {
             username,
             invite_code: inviteCode,
+            invite_note: '',
             invite_expires_at: expiresAt,
             invite_enabled: true,
             created_at: Math.floor(Date.now() / 1000),
@@ -500,6 +505,7 @@ export class D1Storage implements IStorage {
     updates: {
       duration?: InviteDuration;
       enabled?: boolean;
+      note?: string;
     }
   ): Promise<InviteUser> {
     try {
@@ -519,16 +525,19 @@ export class D1Storage implements IStorage {
         typeof updates.enabled === 'boolean'
           ? updates.enabled
           : current.invite_enabled;
+      const note =
+        typeof updates.note === 'string' ? updates.note : current.invite_note;
 
       await db
         .prepare(
-          'UPDATE users SET invite_expires_at = ?, invite_enabled = ? WHERE username = ?'
+          'UPDATE users SET invite_expires_at = ?, invite_enabled = ?, invite_note = ? WHERE username = ?'
         )
-        .bind(expiresAt, enabled ? 1 : 0, userName)
+        .bind(expiresAt, enabled ? 1 : 0, note, userName)
         .run();
 
       return {
         ...current,
+        invite_note: note,
         invite_expires_at: expiresAt,
         invite_enabled: enabled,
       };

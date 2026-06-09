@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS users (
   password TEXT NOT NULL,
   invite_expires_at INTEGER,
   invite_enabled INTEGER NOT NULL DEFAULT 1,
+  invite_note TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
 );
 

@@ -182,6 +182,7 @@ export class DbManager {
     updates: {
       duration?: InviteDuration;
       enabled?: boolean;
+      note?: string;
     }
   ): Promise<InviteUser> {
     if (typeof (this.storage as any).updateInviteUser === 'function') {

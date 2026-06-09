@@ -10,6 +10,7 @@ import { InviteDuration } from '@/lib/types';
 export const runtime = 'edge';
 
 const DURATIONS: InviteDuration[] = ['week', 'month', 'year'];
+const MAX_NOTE_LENGTH = 100;
 
 async function requireAdmin(request: NextRequest) {
   const authInfo = getAuthInfoFromCookie(request);
@@ -94,6 +95,7 @@ export async function PATCH(request: NextRequest) {
       username?: string;
       duration?: InviteDuration;
       enabled?: boolean;
+      note?: string;
     };
 
     if (!body.username) {
@@ -104,14 +106,22 @@ export async function PATCH(request: NextRequest) {
     }
     if (
       typeof body.enabled !== 'boolean' &&
-      typeof body.duration === 'undefined'
+      typeof body.duration === 'undefined' &&
+      typeof body.note === 'undefined'
     ) {
       return NextResponse.json({ error: '缺少更新内容' }, { status: 400 });
+    }
+    if (typeof body.note === 'string' && body.note.length > MAX_NOTE_LENGTH) {
+      return NextResponse.json(
+        { error: '备注不能超过 100 个字符' },
+        { status: 400 }
+      );
     }
 
     const user = await db.updateInviteUser(body.username, {
       duration: body.duration,
       enabled: body.enabled,
+      note: typeof body.note === 'string' ? body.note.trim() : undefined,
     });
 
     return NextResponse.json({ user });
