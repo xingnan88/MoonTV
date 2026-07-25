@@ -160,6 +160,34 @@ div[data-media-provider] video {
   background-color: #000 !important; /* 其余区域填充为黑色 */
 }
 
+/* 拖动进度条时不触发页面滚动或浏览器的手势行为。 */
+.art-video-player .art-progress {
+  touch-action: none;
+}
+
+/* 完全移除进度条上的圆形拖拽定位点，保持轨道清爽。
+   拖拽跳转依赖 pointer 事件直接作用于进度条轨道，与该按钮无关。 */
+.art-video-player .art-progress .art-progress-indicator {
+  display: none !important;
+}
+
+/* 触屏设备为进度条保留 44px 的手指命中区，视觉轨道仍保持轻量。 */
+@media (pointer: coarse) {
+  .art-video-player {
+    --art-bottom-gap: 12px !important;
+    --art-progress-height: 44px !important;
+  }
+
+  /* iOS 会保留 :hover 状态；两种状态都强制保持细轨道。 */
+  .art-video-player .art-progress .art-control-progress-inner,
+  .art-video-player
+    .art-progress
+    .art-control-progress:hover
+    .art-control-progress-inner {
+    height: 6px !important;
+  }
+}
+
 /* 隐藏移动端竖屏时的 pip 按钮 */
 @media (max-width: 768px) {
   .art-control-pip {

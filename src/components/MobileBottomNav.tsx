@@ -74,8 +74,8 @@ const MobileBottomNav = ({ activePath }: MobileBottomNavProps) => {
       style={{
         /* 紧贴视口底部，同时在内部留出安全区高度 */
         bottom: 0,
-        paddingBottom: 'env(safe-area-inset-bottom)',
-        minHeight: 'calc(3.5rem + env(safe-area-inset-bottom))',
+        paddingBottom: 'max(env(safe-area-inset-bottom), 0.75rem)',
+        minHeight: 'calc(3.5rem + max(env(safe-area-inset-bottom), 0.75rem))',
       }}
     >
       <ul className='flex items-center overflow-x-auto scrollbar-hide'>

@@ -17,7 +17,7 @@ const MobileHeader = ({ showBackButton = false }: MobileHeaderProps) => {
     <header
       className='md:hidden w-full bg-white/70 backdrop-blur-xl border-b border-gray-200/50 shadow-sm dark:bg-gray-900/70 dark:border-gray-700/50'
       style={{
-        paddingTop: 'env(safe-area-inset-top)',
+        paddingTop: 'max(env(safe-area-inset-top), 2rem)',
       }}
     >
       <div className='relative h-12 flex items-center justify-between px-4'>

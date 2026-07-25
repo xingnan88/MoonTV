@@ -194,6 +194,60 @@ function PlayPageClient() {
   const artPlayerRef = useRef<any>(null);
   const artRef = useRef<HTMLDivElement | null>(null);
 
+  // 进度条同时支持鼠标、触屏和触控笔拖拽，拖动期间持续跳转到对应时间。
+  const enableProgressDragging = (player: any) => {
+    const progress = player.template?.$progress as HTMLElement | undefined;
+    if (!progress || progress.dataset.dragEnabled) return;
+
+    progress.dataset.dragEnabled = 'true';
+    let activePointerId: number | null = null;
+
+    const seekFromPointer = (event: PointerEvent) => {
+      const duration = player.duration;
+      if (!Number.isFinite(duration) || duration <= 0) return;
+
+      const { left, width } = progress.getBoundingClientRect();
+      if (!width) return;
+
+      const percentage = Math.min(
+        Math.max((event.clientX - left) / width, 0),
+        1
+      );
+      player.seek = percentage * duration;
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!event.isPrimary || event.button !== 0) return;
+
+      activePointerId = event.pointerId;
+      progress.classList.add('is-dragging');
+      progress.setPointerCapture?.(event.pointerId);
+      seekFromPointer(event);
+      event.preventDefault();
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (event.pointerId === activePointerId) {
+        seekFromPointer(event);
+      }
+    };
+
+    const stopDragging = (event: PointerEvent) => {
+      if (event.pointerId !== activePointerId) return;
+
+      activePointerId = null;
+      progress.classList.remove('is-dragging');
+      if (progress.hasPointerCapture?.(event.pointerId)) {
+        progress.releasePointerCapture(event.pointerId);
+      }
+    };
+
+    progress.addEventListener('pointerdown', handlePointerDown);
+    progress.addEventListener('pointermove', handlePointerMove);
+    progress.addEventListener('pointerup', stopDragging);
+    progress.addEventListener('pointercancel', stopDragging);
+  };
+
   // -----------------------------------------------------------------------------
   // 工具函数（Utils）
   // -----------------------------------------------------------------------------
@@ -1251,6 +1305,12 @@ function PlayPageClient() {
         autoPlayback: false,
         airplay: true,
         theme: '#22c55e',
+        cssVar: {
+          // 让进度条与控制按钮分开，并增大可点击/拖拽区域。
+          '--art-bottom-gap': '18px',
+          '--art-progress-height': '14px',
+          '--art-indicator-scale': 0,
+        },
         lang: 'zh-cn',
         hotkey: false,
         fastForward: true,
@@ -1426,6 +1486,8 @@ function PlayPageClient() {
           },
         ],
       });
+
+      enableProgressDragging(artPlayerRef.current);
 
       // 监听播放器事件
       artPlayerRef.current.on('ready', () => {
