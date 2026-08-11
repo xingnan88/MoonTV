@@ -94,6 +94,11 @@ async function initConfig() {
       const customCategories = fileConfig.custom_category || [];
 
       if (adminConfig) {
+        adminConfig.SiteConfig.DanmakuApi =
+          process.env.DANMAKU_API_URL ||
+          adminConfig.SiteConfig.DanmakuApi ||
+          '';
+
         // 补全 SourceConfig
         const sourceConfigMap = new Map(
           (adminConfig.SourceConfig || []).map((s) => [s.key, s])
@@ -201,6 +206,7 @@ async function initConfig() {
             SiteInterfaceCacheTime: fileConfig.cache_time || 7200,
             ImageProxy: process.env.NEXT_PUBLIC_IMAGE_PROXY || '',
             DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
+            DanmakuApi: process.env.DANMAKU_API_URL || '',
             DisableYellowFilter:
               process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
           },
@@ -249,6 +255,7 @@ async function initConfig() {
         SiteInterfaceCacheTime: fileConfig.cache_time || 7200,
         ImageProxy: process.env.NEXT_PUBLIC_IMAGE_PROXY || '',
         DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
+        DanmakuApi: process.env.DANMAKU_API_URL || '',
         DisableYellowFilter:
           process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
       },
@@ -305,6 +312,8 @@ export async function getConfig(): Promise<AdminConfig> {
       process.env.NEXT_PUBLIC_IMAGE_PROXY || '';
     adminConfig.SiteConfig.DoubanProxy =
       process.env.NEXT_PUBLIC_DOUBAN_PROXY || '';
+    adminConfig.SiteConfig.DanmakuApi =
+      process.env.DANMAKU_API_URL || adminConfig.SiteConfig.DanmakuApi || '';
     adminConfig.SiteConfig.DisableYellowFilter =
       process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true';
 
@@ -438,6 +447,7 @@ export async function resetConfig() {
       SiteInterfaceCacheTime: fileConfig.cache_time || 7200,
       ImageProxy: process.env.NEXT_PUBLIC_IMAGE_PROXY || '',
       DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
+      DanmakuApi: process.env.DANMAKU_API_URL || '',
       DisableYellowFilter:
         process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
     },

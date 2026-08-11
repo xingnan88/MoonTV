@@ -52,6 +52,7 @@ interface SiteConfig {
   SiteInterfaceCacheTime: number;
   ImageProxy: string;
   DoubanProxy: string;
+  DanmakuApi: string;
   DisableYellowFilter: boolean;
 }
 
@@ -810,6 +811,7 @@ const SiteConfigComponent = ({ config }: { config: AdminConfig | null }) => {
     SiteInterfaceCacheTime: 7200,
     ImageProxy: '',
     DoubanProxy: '',
+    DanmakuApi: '',
     DisableYellowFilter: false,
   });
   // 保存状态
@@ -829,6 +831,7 @@ const SiteConfigComponent = ({ config }: { config: AdminConfig | null }) => {
         ...config.SiteConfig,
         ImageProxy: config.SiteConfig.ImageProxy || '',
         DoubanProxy: config.SiteConfig.DoubanProxy || '',
+        DanmakuApi: config.SiteConfig.DanmakuApi || '',
         DisableYellowFilter: config.SiteConfig.DisableYellowFilter || false,
       });
     }
@@ -1063,6 +1066,29 @@ const SiteConfigComponent = ({ config }: { config: AdminConfig | null }) => {
         />
         <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
           用于代理豆瓣数据访问，解决跨域或访问限制问题。留空则使用服务端API。
+        </p>
+      </div>
+
+      {/* 弹幕聚合 API */}
+      <div>
+        <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+          弹幕聚合 API
+        </label>
+        <input
+          type='url'
+          placeholder='例如: https://danmu.example.com'
+          value={siteSettings.DanmakuApi}
+          onChange={(e) =>
+            setSiteSettings((prev) => ({
+              ...prev,
+              DanmakuApi: e.target.value,
+            }))
+          }
+          className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+        />
+        <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+          兼容 LogVar/FongMi 接口，仅用于显示弹幕。环境变量 DANMAKU_API_URL
+          的优先级更高，留空则关闭弹幕数据源。
         </p>
       </div>
 

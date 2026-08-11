@@ -221,7 +221,20 @@ networks:
 | NEXT_PUBLIC_SEARCH_MAX_PAGE       | 搜索接口可拉取的最大页数                     | 1-50                             | 5                                                                                                                          |
 | NEXT_PUBLIC_IMAGE_PROXY           | 默认的浏览器端图片代理                       | url prefix                       | (空)                                                                                                                       |
 | NEXT_PUBLIC_DOUBAN_PROXY          | 默认的浏览器端豆瓣数据代理                   | url prefix                       | (空)                                                                                                                       |
+| DANMAKU_API_URL                   | 只读弹幕聚合服务地址                         | http(s) url                      | (空，关闭弹幕数据源)                                                                                                       |
 | NEXT_PUBLIC_DISABLE_YELLOW_FILTER | 关闭色情内容过滤                             | true/false                       | false                                                                                                                      |
+
+### 弹幕配置
+
+MoonTV 支持读取兼容 FongMi 接口的弹幕聚合服务，推荐自行部署免费的
+[danmu_api](https://github.com/huangxd-/danmu_api)。将服务根地址填写到后台的“弹幕聚合 API”，或设置环境变量：
+
+```bash
+DANMAKU_API_URL=https://danmu.example.com
+```
+
+如果服务启用了路径 Token，也可以配置为
+`https://danmu.example.com/87654321`。MoonTV 只会读取并显示弹幕，不提供发送入口；播放器设置中可选择弹幕显示区域和字号，偏好会保存在当前浏览器。未配置、未匹配或上游不可用时会自动使用空弹幕，视频播放不受影响。
 
 ## 配置说明
 
