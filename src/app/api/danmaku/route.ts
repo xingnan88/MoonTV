@@ -67,7 +67,6 @@ async function fetchCandidates(
   const response = await fetchWithTimeout(
     matchUrl,
     {
-      cache: 'no-store',
       headers: { Accept: 'application/json' },
     },
     MATCH_TIMEOUT_MS
@@ -121,7 +120,6 @@ export async function GET(request: NextRequest) {
     const commentResponse = await fetchWithTimeout(
       commentUrl,
       {
-        cache: 'no-store',
         headers: { Accept: 'application/xml,text/xml' },
       },
       COMMENT_TIMEOUT_MS
