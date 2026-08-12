@@ -3,11 +3,24 @@
 'use client';
 
 import Artplayer from 'artplayer';
+import artplayerPluginDanmuku from 'artplayer-plugin-danmuku';
 import Hls from 'hls.js';
 import { Heart } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState } from 'react';
 
+import {
+  buildDanmakuRequestUrl,
+  DANMAKU_DISPLAY_AREA_OPTIONS,
+  DANMAKU_FONT_SIZE_OPTIONS,
+  DanmakuDisplayArea,
+  DanmakuDisplaySettings,
+  DEFAULT_DANMAKU_DISPLAY_SETTINGS,
+  getDanmakuDisplayAreaFromMargin,
+  getDanmakuDisplayAreaOption,
+  normalizeDanmakuDisplaySettings,
+  parseDanmakuDisplaySettings,
+} from '@/lib/danmaku';
 import {
   deleteFavorite,
   deletePlayRecord,
@@ -31,6 +44,47 @@ import PageLayout from '@/components/PageLayout';
 declare global {
   interface HTMLVideoElement {
     hls?: any;
+  }
+}
+
+const DANMAKU_VISIBLE_STORAGE_KEY = 'enable_danmaku';
+const DANMAKU_DISPLAY_STORAGE_KEY = 'danmaku_display_settings_v1';
+
+function getDanmakuVisible() {
+  try {
+    const saved = localStorage.getItem(DANMAKU_VISIBLE_STORAGE_KEY);
+    return saved === null ? true : saved === 'true';
+  } catch {
+    return true;
+  }
+}
+
+function saveDanmakuVisible(visible: boolean) {
+  try {
+    localStorage.setItem(DANMAKU_VISIBLE_STORAGE_KEY, String(visible));
+  } catch {
+    // localStorage 不可用时仍允许本次播放继续。
+  }
+}
+
+function getDanmakuDisplaySettings() {
+  try {
+    return parseDanmakuDisplaySettings(
+      localStorage.getItem(DANMAKU_DISPLAY_STORAGE_KEY)
+    );
+  } catch {
+    return { ...DEFAULT_DANMAKU_DISPLAY_SETTINGS };
+  }
+}
+
+function saveDanmakuDisplaySettings(settings: DanmakuDisplaySettings) {
+  try {
+    localStorage.setItem(
+      DANMAKU_DISPLAY_STORAGE_KEY,
+      JSON.stringify(normalizeDanmakuDisplaySettings(settings))
+    );
+  } catch {
+    // localStorage 不可用时仍允许本次播放继续。
   }
 }
 
@@ -193,6 +247,10 @@ function PlayPageClient() {
 
   const artPlayerRef = useRef<any>(null);
   const artRef = useRef<HTMLDivElement | null>(null);
+  const danmakuLoadIdRef = useRef(0);
+  const danmakuDisplaySettingsRef = useRef<DanmakuDisplaySettings>({
+    ...DEFAULT_DANMAKU_DISPLAY_SETTINGS,
+  });
 
   // 进度条同时支持鼠标、触屏和触控笔拖拽，拖动期间持续跳转到对应时间。
   const enableProgressDragging = (player: any) => {
@@ -1241,7 +1299,16 @@ function PlayPageClient() {
       setError('视频地址无效');
       return;
     }
+    if (videoUrl !== detail.episodes[currentEpisodeIndex]) {
+      return;
+    }
     console.log(videoUrl);
+
+    const danmakuUrl = buildDanmakuRequestUrl(
+      videoTitle,
+      currentEpisodeIndex + 1,
+      detail?.year || videoYear
+    );
 
     // 检测是否为WebKit浏览器
     const isWebkit =
@@ -1255,6 +1322,33 @@ function PlayPageClient() {
         currentEpisodeIndex + 1
       }集`;
       artPlayerRef.current.poster = videoCover;
+
+      const danmakuPlugin =
+        artPlayerRef.current.plugins?.artplayerPluginDanmuku;
+      if (danmakuPlugin) {
+        const loadId = ++danmakuLoadIdRef.current;
+        danmakuPlugin.config({ danmuku: danmakuUrl });
+        void danmakuPlugin
+          .load()
+          .then(() => {
+            // 快速切集时，较旧请求可能后返回；再次加载当前配置以避免串集。
+            if (
+              loadId !== danmakuLoadIdRef.current &&
+              artPlayerRef.current?.plugins?.artplayerPluginDanmuku ===
+                danmakuPlugin
+            ) {
+              return danmakuPlugin.load();
+            }
+            return danmakuPlugin;
+          })
+          .catch((error: unknown) => {
+            console.warn('切换弹幕失败:', error);
+            if (artPlayerRef.current) {
+              artPlayerRef.current.notice.show = '弹幕加载失败，请稍后刷新重试';
+            }
+          });
+      }
+
       if (artPlayerRef.current?.video) {
         ensureVideoSource(
           artPlayerRef.current.video as HTMLVideoElement,
@@ -1266,6 +1360,7 @@ function PlayPageClient() {
 
     // WebKit浏览器或首次创建：销毁之前的播放器实例并创建新的
     if (artPlayerRef.current) {
+      danmakuLoadIdRef.current += 1;
       if (artPlayerRef.current.video && artPlayerRef.current.video.hls) {
         artPlayerRef.current.video.hls.destroy();
       }
@@ -1278,6 +1373,12 @@ function PlayPageClient() {
       // 创建新的播放器实例
       Artplayer.PLAYBACK_RATE = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
       Artplayer.USE_RAF = true;
+
+      const danmakuDisplaySettings = getDanmakuDisplaySettings();
+      danmakuDisplaySettingsRef.current = danmakuDisplaySettings;
+      const danmakuDisplayArea = getDanmakuDisplayAreaOption(
+        danmakuDisplaySettings.displayArea
+      );
 
       artPlayerRef.current = new Artplayer({
         container: artRef.current,
@@ -1319,6 +1420,18 @@ function PlayPageClient() {
         moreVideoAttr: {
           crossOrigin: 'anonymous',
         },
+        plugins: [
+          artplayerPluginDanmuku({
+            danmuku: danmakuUrl,
+            emitter: false,
+            visible: getDanmakuVisible(),
+            antiOverlap: true,
+            synchronousPlayback: true,
+            margin: [...danmakuDisplayArea.margin],
+            fontSize: danmakuDisplaySettings.fontSize,
+            opacity: 0.85,
+          }),
+        ],
         // HLS 支持配置
         customType: {
           m3u8: function (video: HTMLVideoElement, url: string) {
@@ -1378,6 +1491,63 @@ function PlayPageClient() {
             '<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MCIgaGVpZ2h0PSI1MCIgdmlld0JveD0iMCAwIDUwIDUwIj48cGF0aCBkPSJNMjUuMjUxIDYuNDYxYy0xMC4zMTggMC0xOC42ODMgOC4zNjUtMTguNjgzIDE4LjY4M2g0LjA2OGMwLTguMDcgNi41NDUtMTQuNjE1IDE0LjYxNS0xNC42MTVWNi40NjF6IiBmaWxsPSIjMDA5Njg4Ij48YW5pbWF0ZVRyYW5zZm9ybSBhdHRyaWJ1dGVOYW1lPSJ0cmFuc2Zvcm0iIGF0dHJpYnV0ZVR5cGU9IlhNTCIgZHVyPSIxcyIgZnJvbT0iMCAyNSAyNSIgcmVwZWF0Q291bnQ9ImluZGVmaW5pdGUiIHRvPSIzNjAgMjUgMjUiIHR5cGU9InJvdGF0ZSIvPjwvcGF0aD48L3N2Zz4=">',
         },
         settings: [
+          {
+            name: 'danmaku-display-area',
+            html: '弹幕位置',
+            tooltip: danmakuDisplayArea.label,
+            selector: DANMAKU_DISPLAY_AREA_OPTIONS.map((option) => ({
+              name: `danmaku-display-area-${option.value}`,
+              html: option.label,
+              value: option.value,
+              default: option.value === danmakuDisplaySettings.displayArea,
+            })),
+            onSelect(item) {
+              const displayArea = item.value as DanmakuDisplayArea;
+              const displayOption = getDanmakuDisplayAreaOption(displayArea);
+              const nextSettings = {
+                ...danmakuDisplaySettingsRef.current,
+                displayArea,
+              };
+              danmakuDisplaySettingsRef.current = nextSettings;
+              saveDanmakuDisplaySettings(nextSettings);
+
+              const plugin =
+                artPlayerRef.current?.plugins?.artplayerPluginDanmuku;
+              plugin?.config({ margin: [...displayOption.margin] });
+              if (plugin?.option?.mount) {
+                plugin.mount(plugin.option.mount);
+              }
+              plugin?.reset();
+              return item.html;
+            },
+          },
+          {
+            name: 'danmaku-font-size',
+            html: '弹幕字号',
+            tooltip: `${danmakuDisplaySettings.fontSize}px`,
+            selector: DANMAKU_FONT_SIZE_OPTIONS.map((fontSize) => ({
+              name: `danmaku-font-size-${fontSize}`,
+              html: `${fontSize}px`,
+              value: fontSize,
+              default: fontSize === danmakuDisplaySettings.fontSize,
+            })),
+            onSelect(item) {
+              const fontSize = Number(item.value);
+              const nextSettings = normalizeDanmakuDisplaySettings({
+                ...danmakuDisplaySettingsRef.current,
+                fontSize,
+              });
+              danmakuDisplaySettingsRef.current = nextSettings;
+              saveDanmakuDisplaySettings(nextSettings);
+              const plugin =
+                artPlayerRef.current?.plugins?.artplayerPluginDanmuku;
+              plugin?.config({ fontSize: nextSettings.fontSize });
+              if (plugin?.option?.mount) {
+                plugin.mount(plugin.option.mount);
+              }
+              return `${nextSettings.fontSize}px`;
+            },
+          },
           {
             html: '去广告',
             icon: '<text x="50%" y="50%" font-size="20" font-weight="bold" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">AD</text>',
@@ -1493,6 +1663,68 @@ function PlayPageClient() {
       artPlayerRef.current.on('ready', () => {
         setError(null);
       });
+
+      artPlayerRef.current.on(
+        'artplayerPluginDanmuku:error',
+        (error: unknown) => {
+          console.warn('弹幕加载失败，不影响视频播放:', error);
+          if (artPlayerRef.current) {
+            artPlayerRef.current.notice.show = '弹幕加载失败，请稍后刷新重试';
+          }
+        }
+      );
+      artPlayerRef.current.on('artplayerPluginDanmuku:show', () => {
+        saveDanmakuVisible(true);
+      });
+      artPlayerRef.current.on('artplayerPluginDanmuku:hide', () => {
+        saveDanmakuVisible(false);
+      });
+      artPlayerRef.current.on(
+        'artplayerPluginDanmuku:config',
+        (option: { margin?: unknown; fontSize?: unknown }) => {
+          const previousSettings = danmakuDisplaySettingsRef.current;
+          const displayArea =
+            getDanmakuDisplayAreaFromMargin(option.margin) ||
+            previousSettings.displayArea;
+          const nextSettings = normalizeDanmakuDisplaySettings({
+            displayArea,
+            fontSize: option.fontSize,
+          });
+
+          if (
+            displayArea === previousSettings.displayArea &&
+            nextSettings.fontSize === previousSettings.fontSize
+          ) {
+            return;
+          }
+
+          danmakuDisplaySettingsRef.current = nextSettings;
+          saveDanmakuDisplaySettings(nextSettings);
+
+          const positionItem = artPlayerRef.current?.setting?.find(
+            `danmaku-display-area-${nextSettings.displayArea}`
+          );
+          if (positionItem) {
+            artPlayerRef.current.setting.check(positionItem);
+          }
+
+          const fontSizeSetting =
+            artPlayerRef.current?.setting?.find('danmaku-font-size');
+          if (fontSizeSetting) {
+            fontSizeSetting.tooltip = `${nextSettings.fontSize}px`;
+          }
+          const fontSizeItem = artPlayerRef.current?.setting?.find(
+            `danmaku-font-size-${nextSettings.fontSize}`
+          );
+          if (fontSizeItem) {
+            artPlayerRef.current.setting.check(fontSizeItem);
+          }
+
+          if (displayArea !== previousSettings.displayArea) {
+            artPlayerRef.current?.plugins?.artplayerPluginDanmuku?.reset();
+          }
+        }
+      );
 
       artPlayerRef.current.on('video:volumechange', () => {
         lastVolumeRef.current = artPlayerRef.current.volume;
@@ -1631,13 +1863,21 @@ function PlayPageClient() {
       console.error('创建播放器失败:', err);
       setError('播放器初始化失败');
     }
-  }, [Artplayer, Hls, videoUrl, loading, blockAdEnabled]);
+  }, [Artplayer, Hls, videoUrl, loading, blockAdEnabled, currentEpisodeIndex]);
 
   // 当组件卸载时清理定时器
   useEffect(() => {
     return () => {
       if (saveIntervalRef.current) {
         clearInterval(saveIntervalRef.current);
+      }
+      if (artPlayerRef.current) {
+        danmakuLoadIdRef.current += 1;
+        if (artPlayerRef.current.video?.hls) {
+          artPlayerRef.current.video.hls.destroy();
+        }
+        artPlayerRef.current.destroy();
+        artPlayerRef.current = null;
       }
     };
   }, []);

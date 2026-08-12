@@ -35,6 +35,7 @@ export async function POST(request: NextRequest) {
       SiteInterfaceCacheTime,
       ImageProxy,
       DoubanProxy,
+      DanmakuApi,
       DisableYellowFilter,
     } = body as {
       SiteName: string;
@@ -43,6 +44,7 @@ export async function POST(request: NextRequest) {
       SiteInterfaceCacheTime: number;
       ImageProxy: string;
       DoubanProxy: string;
+      DanmakuApi: string;
       DisableYellowFilter: boolean;
     };
 
@@ -54,9 +56,25 @@ export async function POST(request: NextRequest) {
       typeof SiteInterfaceCacheTime !== 'number' ||
       typeof ImageProxy !== 'string' ||
       typeof DoubanProxy !== 'string' ||
+      typeof DanmakuApi !== 'string' ||
       typeof DisableYellowFilter !== 'boolean'
     ) {
       return NextResponse.json({ error: '参数格式错误' }, { status: 400 });
+    }
+
+    const normalizedDanmakuApi = DanmakuApi.trim();
+    if (normalizedDanmakuApi) {
+      try {
+        const url = new URL(normalizedDanmakuApi);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+          throw new Error('unsupported protocol');
+        }
+      } catch {
+        return NextResponse.json(
+          { error: '弹幕聚合 API 必须是有效的 HTTP(S) 地址' },
+          { status: 400 }
+        );
+      }
     }
 
     const adminConfig = await getConfig();
@@ -81,6 +99,7 @@ export async function POST(request: NextRequest) {
       SiteInterfaceCacheTime,
       ImageProxy,
       DoubanProxy,
+      DanmakuApi: normalizedDanmakuApi,
       DisableYellowFilter,
     };
 
