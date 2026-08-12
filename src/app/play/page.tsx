@@ -1343,6 +1343,9 @@ function PlayPageClient() {
           })
           .catch((error: unknown) => {
             console.warn('切换弹幕失败:', error);
+            if (artPlayerRef.current) {
+              artPlayerRef.current.notice.show = '弹幕加载失败，请稍后刷新重试';
+            }
           });
       }
 
@@ -1665,6 +1668,9 @@ function PlayPageClient() {
         'artplayerPluginDanmuku:error',
         (error: unknown) => {
           console.warn('弹幕加载失败，不影响视频播放:', error);
+          if (artPlayerRef.current) {
+            artPlayerRef.current.notice.show = '弹幕加载失败，请稍后刷新重试';
+          }
         }
       );
       artPlayerRef.current.on('artplayerPluginDanmuku:show', () => {

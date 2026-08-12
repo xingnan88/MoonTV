@@ -13,15 +13,16 @@ import {
 export const runtime = 'edge';
 
 const MATCH_TIMEOUT_MS = 8_000;
-const COMMENT_TIMEOUT_MS = 15_000;
+const COMMENT_TIMEOUT_MS = 60_000;
 
 function createXmlResponse(
   xml: string,
   status: string,
-  cacheControl = 'private, max-age=300'
+  cacheControl = 'private, max-age=300',
+  httpStatus = 200
 ) {
   return new NextResponse(xml, {
-    status: 200,
+    status: httpStatus,
     headers: {
       'Cache-Control': cacheControl,
       'Content-Type': 'application/xml; charset=utf-8',
@@ -30,8 +31,8 @@ function createXmlResponse(
   });
 }
 
-function createEmptyResponse(status: string) {
-  return createXmlResponse(EMPTY_DANMAKU_XML, status, 'no-store');
+function createEmptyResponse(status: string, httpStatus = 200) {
+  return createXmlResponse(EMPTY_DANMAKU_XML, status, 'no-store', httpStatus);
 }
 
 async function fetchWithTimeout(
@@ -137,6 +138,10 @@ export async function GET(request: NextRequest) {
     return createXmlResponse(xml, 'ok');
   } catch (error) {
     console.warn('加载弹幕失败:', error);
-    return createEmptyResponse('upstream-error');
+    const timedOut = error instanceof Error && error.name === 'AbortError';
+    return createEmptyResponse(
+      timedOut ? 'timeout' : 'upstream-error',
+      timedOut ? 504 : 502
+    );
   }
 }
