@@ -12,7 +12,7 @@ import {
 
 export const runtime = 'edge';
 
-const MATCH_TIMEOUT_MS = 8_000;
+const MATCH_TIMEOUT_MS = 30_000;
 const COMMENT_TIMEOUT_MS = 60_000;
 
 function createXmlResponse(
