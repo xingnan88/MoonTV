@@ -171,6 +171,22 @@ div[data-media-provider] video {
   display: none !important;
 }
 
+/*
+ * 弹幕插件默认会给滚动文字预建 3D 合成层，并叠加四层带模糊的阴影。
+ * 文字横向移动时这会放大小数像素重采样带来的发虚；改用较重的系统中文字体
+ * 和无模糊硬描边，同时让浏览器按实际动画需要决定是否提升合成层。
+ */
+.art-video-player .art-danmuku > [data-mode='0'] {
+  perspective: none !important;
+  will-change: auto !important;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'PingFang SC',
+    'Microsoft YaHei', sans-serif !important;
+  font-weight: 600 !important;
+  text-rendering: geometricPrecision;
+  text-shadow: -1px 0 0 rgba(0, 0, 0, 0.9), 1px 0 0 rgba(0, 0, 0, 0.9),
+    0 -1px 0 rgba(0, 0, 0, 0.9), 0 1px 0 rgba(0, 0, 0, 0.9) !important;
+}
+
 /* 触屏设备为进度条保留 44px 的手指命中区，视觉轨道仍保持轻量。 */
 @media (pointer: coarse) {
   .art-video-player {

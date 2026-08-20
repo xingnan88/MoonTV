@@ -1427,9 +1427,11 @@ function PlayPageClient() {
             visible: getDanmakuVisible(),
             antiOverlap: true,
             synchronousPlayback: true,
+            // 延长横跨屏幕的时间，减少快速位移造成的动态笔画发虚。
+            speed: 7.5,
             margin: [...danmakuDisplayArea.margin],
             fontSize: danmakuDisplaySettings.fontSize,
-            opacity: 0.85,
+            opacity: 1,
           }),
         ],
         // HLS 支持配置
