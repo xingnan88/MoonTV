@@ -1,0 +1,3 @@
+# Deployment automation and ownership rules are security-sensitive.
+/.github/workflows/ @xingnan88
+/.github/CODEOWNERS @xingnan88
